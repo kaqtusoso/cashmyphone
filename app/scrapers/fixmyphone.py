@@ -1,17 +1,9 @@
 """
-FixMyPhone-scraper – Playwright-baserad.
+FixMyPhone-scraper – Playwright med parallella sidor.
 
-FixMyPhone (salja.fixmyphone.se) beräknar inköpspriser dynamiskt i browsern
-via ett custom JS-kalkylverktyg (#estimatePrice / #estimateBlock).
-Priserna är INTE tillgängliga via REST API eller statisk HTML.
-
-Flöde per modell:
-  1. Navigera till modellsidan (t.ex. /salja/iphone-15-pro/)
-  2. Välj lagring (1TB → 128 GB) och skick "Som ny" / "Mycket bra" etc.
-  3. Välj "Ja" / "Nej" på övriga frågor (bästa möjliga skick)
-  4. Läs av priset från #estimatePrice-elementet
-
-Modell-slugar hämtas från FixMyPhones navigation.
+FixMyPhone (salja.fixmyphone.se) beräknar priser dynamiskt i browsern.
+Optimering: kör upp till 3 modeller parallellt med asyncio.Semaphore
+istället för sekventiellt.
 """
 import asyncio
 import logging
@@ -26,25 +18,17 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://salja.fixmyphone.se"
 NAV_URL = "https://fixmyphone.se"
 
-# Lagringsvärden → select index (0=1TB, 1=512GB, 2=256GB, 3=128GB)
-STORAGE_OPTIONS = [
-    (0, 1024),   # 1TB
-    (1, 512),    # 512 GB
-    (2, 256),    # 256 GB
-    (3, 128),    # 128 GB
-    (4, 64),     # 64 GB (äldre modeller)
-]
-
-# Välj bästa möjliga skick för alla selects
 BEST_CONDITION_SELECTIONS = {
-    "condition": "like_new",   # Som ny
-    "isWorking": "1",          # Fungerar
-    "isDisplay": "1",          # Skärm ok
-    "isCracked": "0",          # Ej sprucken
-    "isWaterDamaged": "0",     # Ej vattenskadad
-    "isBattery": "1",          # Bra batteri
-    "hasBox": "0",             # Ingen låda (konservativt)
+    "condition": "like_new",
+    "isWorking": "1",
+    "isDisplay": "1",
+    "isCracked": "0",
+    "isWaterDamaged": "0",
+    "isBattery": "1",
+    "hasBox": "0",
 }
+
+MAX_CONCURRENT_PAGES = 3
 
 
 class FixMyPhoneScraper(BaseScraper):
@@ -62,31 +46,41 @@ class FixMyPhoneScraper(BaseScraper):
             context = await browser.new_context(
                 user_agent=(
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 ),
                 locale="sv-SE",
             )
 
             try:
-                # Hämta alla modell-slugar från navigationen
                 model_slugs = await self._get_model_slugs(context)
-                logger.info(f"FixMyPhone: {len(model_slugs)} iPhone-modeller hittade")
+                logger.info(f"FixMyPhone: {len(model_slugs)} modeller hittade, kör parallellt ({MAX_CONCURRENT_PAGES} åt gången)")
 
-                for model_name, slug in model_slugs:
-                    model_prices = await self._scrape_model(context, model_name, slug)
-                    prices.extend(model_prices)
-                    await asyncio.sleep(0.5)
+                sem = asyncio.Semaphore(MAX_CONCURRENT_PAGES)
+
+                async def scrape_with_sem(model_name: str, slug: str) -> List[Dict]:
+                    async with sem:
+                        return await self._scrape_model(context, model_name, slug)
+
+                results = await asyncio.gather(
+                    *[scrape_with_sem(name, slug) for name, slug in model_slugs],
+                    return_exceptions=True,
+                )
+
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.debug(f"FixMyPhone: modell-fel: {result}")
+                    elif result:
+                        prices.extend(result)
 
             except Exception as e:
                 logger.exception(f"FixMyPhone: oväntat fel: {e}")
             finally:
                 await browser.close()
 
+        logger.info(f"FixMyPhone: {len(prices)} priser hämtade")
         return prices
 
     async def _get_model_slugs(self, context) -> List[tuple]:
-        """Hämta iPhone-modeller och deras slug-URLs från navigationen."""
         page = await context.new_page()
         slugs = []
         try:
@@ -100,7 +94,6 @@ class FixMyPhoneScraper(BaseScraper):
                 m = re.search(r"/salja/(iphone[^/]+)/?$", href)
                 if m:
                     slug = m.group(1)
-                    # Rensa modellnamn
                     model = re.sub(r"^Sälj\s+", "", text, flags=re.I).strip()
                     if slug not in seen and model:
                         seen.add(slug)
@@ -112,29 +105,22 @@ class FixMyPhoneScraper(BaseScraper):
         return slugs
 
     async def _scrape_model(self, context, model_name: str, slug: str) -> List[Dict]:
-        """Scrapa priser för en modell (alla tillgängliga lagringsstorlekar)."""
         url = f"{BASE_URL}/salja/{slug}/"
         prices = []
-
         page = await context.new_page()
         try:
             await page.goto(url, wait_until="networkidle", timeout=30000)
 
-            # Sätt alla skick-selects till bästa värde
             for select_name, value in BEST_CONDITION_SELECTIONS.items():
                 try:
-                    await page.select_option(
-                        f'select[name="{select_name}"]', value, timeout=2000
-                    )
+                    await page.select_option(f'select[name="{select_name}"]', value, timeout=1500)
                 except Exception:
-                    pass  # Selecten kanske inte finns för denna modell
+                    pass
 
-            # Hämta pris för varje lagringsalternativ
             storage_select = page.locator('select:not([name])')
             count = await storage_select.count()
 
             if count == 0:
-                # Kanske en enda lagringsvariant utan select
                 price = await self._read_price(page)
                 if price:
                     prices.append({
@@ -149,10 +135,8 @@ class FixMyPhoneScraper(BaseScraper):
                 for i, opt in enumerate(options):
                     opt_text = await opt.inner_text()
                     storage_gb = self._parse_storage(opt_text)
-
                     await storage_select.first.select_option(index=i)
-                    await page.wait_for_timeout(400)
-
+                    await page.wait_for_timeout(300)
                     price = await self._read_price(page)
                     if price and price > 100:
                         prices.append({
@@ -173,9 +157,8 @@ class FixMyPhoneScraper(BaseScraper):
         return prices
 
     async def _read_price(self, page) -> int | None:
-        """Läs priset från #estimatePrice-elementet."""
         try:
-            await page.wait_for_selector("#estimatePrice", timeout=3000)
+            await page.wait_for_selector("#estimatePrice", timeout=2500)
             price_text = await page.locator("#estimatePrice").inner_text()
             m = re.search(r"([\d\s\xa0]+)", price_text.replace("\xa0", " "))
             if m:

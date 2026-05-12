@@ -1,7 +1,9 @@
+import asyncio
 import logging
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import ScrapeStatusOut
+from ..database import AsyncSessionLocal
 from .swappie import SwappieScraper
 from .phonehero import PhoneHeroScraper
 from .happyphone import HappyPhoneScraper
@@ -34,10 +36,30 @@ async def run_scraper(retailer_id: str, db: AsyncSession) -> ScrapeStatusOut:
 
 
 async def run_all_scrapers(db: AsyncSession) -> List[ScrapeStatusOut]:
-    """Kör alla scrapers och returnera status för varje."""
+    """Kör alla scrapers parallellt – varje scraper får en egen DB-session."""
+
+    async def run_isolated(retailer_id: str, scraper_class) -> ScrapeStatusOut:
+        async with AsyncSessionLocal() as session:
+            logger.info(f"→ Startar {scraper_class.retailer_name if hasattr(scraper_class, 'retailer_name') else retailer_id}...")
+            return await scraper_class().run(session)
+
+    tasks = [
+        run_isolated(rid, cls)
+        for rid, cls in SCRAPERS.items()
+    ]
+
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
     results = []
-    for retailer_id, scraper_class in SCRAPERS.items():
-        logger.info(f"→ Startar {scraper_class().retailer_name}...")
-        result = await scraper_class().run(db)
-        results.append(result)
+    for retailer_id, result in zip(SCRAPERS.keys(), raw_results):
+        if isinstance(result, Exception):
+            logger.error(f"Scraper '{retailer_id}' kraschade: {result}")
+            results.append(ScrapeStatusOut(
+                retailer=retailer_id,
+                status="error",
+                message=str(result),
+            ))
+        else:
+            results.append(result)
+
     return results

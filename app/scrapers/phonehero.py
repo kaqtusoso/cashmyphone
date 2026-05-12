@@ -1,15 +1,8 @@
 """
-PhoneHero-scraper
+PhoneHero-scraper – parallell modell-hämtning.
 
-PhoneHero's sälj-sida (https://phonehero.se/salj-din-gamla-mobil-till-oss)
-använder Laravel Livewire. När du skickar ?model={slug} i URL:en bäddar
-sidan in komplett prisdata i wire:snapshot för selldevice-komponenten —
-inklusive alla lagringsstorlekar och skick-justeringar.
-
-Flöde:
-  1. Hämta startsidan och sök "iPhone" via Livewire → lista med modell-slugar
-  2. För varje slug: GET ?model={slug} → extrahera sizes[].price (basbelopp)
-  3. Skicket "nyskick" (best) = inget avdrag från basbeloppet
+Livewire-baserad scraper som hämtar alla modeller via ?model={slug}.
+Optimering: kör upp till 8 HTTP-förfrågningar parallellt med asyncio.Semaphore.
 """
 import httpx
 import logging
@@ -46,26 +39,32 @@ class PhoneHeroScraper(BaseScraper):
             follow_redirects=True,
             headers=HEADERS,
         ) as client:
-            # Steg 1: hämta alla iPhone-modell-slugar via Livewire-sökning
             slugs = await self._get_iphone_slugs(client)
             if not slugs:
                 logger.warning("PhoneHero: inga modell-slugar hittade")
                 return []
 
-            logger.info(f"PhoneHero: hittade {len(slugs)} modeller att hämta priser för")
+            logger.info(f"PhoneHero: {len(slugs)} modeller – hämtar parallellt (8 åt gången)")
 
-            prices: List[Dict] = []
-            for slug, name in slugs:
-                model_prices = await self._fetch_model_prices(client, slug, name)
-                prices.extend(model_prices)
-                await asyncio.sleep(0.3)  # Var snäll mot servern
+            sem = asyncio.Semaphore(8)
+
+            async def fetch_with_sem(slug: str, name: str) -> List[Dict]:
+                async with sem:
+                    return await self._fetch_model_prices(client, slug, name)
+
+            results = await asyncio.gather(
+                *[fetch_with_sem(slug, name) for slug, name in slugs],
+                return_exceptions=True,
+            )
+
+            prices = []
+            for result in results:
+                if isinstance(result, list):
+                    prices.extend(result)
 
             return prices
 
-    # ─── Steg 1: hitta alla iPhone-slugar ───────────────────────────────────
-
     async def _get_iphone_slugs(self, client: httpx.AsyncClient) -> List[tuple]:
-        """Hämta alla iPhone-modeller med slug och namn via Livewire-sökning."""
         try:
             resp = await client.get(SELL_URL)
             resp.raise_for_status()
@@ -102,7 +101,6 @@ class PhoneHeroScraper(BaseScraper):
             new_snap = json.loads(comp.get("snapshot", "{}"))
             results = new_snap.get("data", {}).get("results", [])
 
-            # results är en nästlad lista: results[0] är listan med träffar
             items = results[0] if results and isinstance(results[0], list) else results
             slugs = []
             for entry in items:
@@ -112,7 +110,6 @@ class PhoneHeroScraper(BaseScraper):
                     slug = model.get("slug", "")
                     name = model.get("name", "")
                     if slug and "iphone" in slug.lower():
-                        # Rensa "Apple " prefix
                         clean_name = re.sub(r"^Apple\s+", "", name).strip()
                         slugs.append((slug, clean_name))
 
@@ -122,12 +119,9 @@ class PhoneHeroScraper(BaseScraper):
             logger.exception(f"PhoneHero: fel vid slug-hämtning: {e}")
             return []
 
-    # ─── Steg 2: hämta priser för en specifik modell ────────────────────────
-
     async def _fetch_model_prices(
         self, client: httpx.AsyncClient, slug: str, model_name: str
     ) -> List[Dict]:
-        """Hämta priser för en modell via ?model={slug}."""
         try:
             resp = await client.get(SELL_URL, params={"model": slug})
             if resp.status_code != 200:
@@ -140,17 +134,14 @@ class PhoneHeroScraper(BaseScraper):
 
             snap = json.loads(snap_raw)
             working_model = snap.get("data", {}).get("workingModel")
-
             if not working_model:
                 return []
 
-            # working_model är en Livewire-nästlad lista: [item, {'s': 'arr'}]
             wm = working_model[0] if isinstance(working_model, list) else working_model
             sizes = wm.get("sizes", [])
             if not sizes:
                 return []
 
-            # sizes är nästlad: [[{size_obj}, {'s': 'arr'}], ...]
             sizes_list = sizes[0] if isinstance(sizes[0], list) else sizes
 
             prices = []
@@ -158,18 +149,14 @@ class PhoneHeroScraper(BaseScraper):
                 if not isinstance(size_entry, list) or not size_entry:
                     continue
                 size = size_entry[0]
-                storage_str = size.get("name", "")  # e.g., "128 GB" eller "1 TB"
+                storage_str = size.get("name", "")
                 base_price = size.get("price", 0)
-
                 if not base_price or base_price <= 0:
                     continue
-
-                storage_gb = self._parse_storage(storage_str)
-
                 prices.append({
                     "model": model_name,
-                    "storage_gb": storage_gb,
-                    "condition": "nyskick",  # Basbeloppet = bästa skick
+                    "storage_gb": self._parse_storage(storage_str),
+                    "condition": "nyskick",
                     "price_sek": int(base_price),
                     "url": f"{SELL_URL}?model={slug}",
                 })
@@ -179,8 +166,6 @@ class PhoneHeroScraper(BaseScraper):
         except Exception as e:
             logger.debug(f"PhoneHero: fel för {slug}: {e}")
             return []
-
-    # ─── Hjälpmetoder ────────────────────────────────────────────────────────
 
     def _get_csrf(self, soup: BeautifulSoup) -> Optional[str]:
         meta = soup.find("meta", {"name": "csrf-token"})
@@ -197,7 +182,6 @@ class PhoneHeroScraper(BaseScraper):
         return el.get("wire:snapshot") if el else None
 
     def _parse_storage(self, storage_str: str) -> Optional[int]:
-        """Konvertera '128 GB' → 128, '1 TB' → 1024."""
         m = STORAGE_RE.search(storage_str)
         if not m:
             return None
