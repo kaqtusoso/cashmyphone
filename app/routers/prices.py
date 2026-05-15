@@ -228,6 +228,57 @@ async def get_quote(
     )
 
 
+class ImportPrice(BaseModel):
+    model: str
+    storage_gb: Optional[int] = None
+    condition: Optional[str] = None
+    price_sek: int
+    url: Optional[str] = None
+
+
+@router.post("/import-prices/{retailer}", summary="Importera förhandshämtade priser (för lokala scrapers)")
+async def import_prices(
+    retailer: str,
+    prices: List[ImportPrice],
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Tar emot en lista priser från en lokal scraper och sparar dem i DB.
+    Markerar alla befintliga priser för återförsäljaren som inaktiva först.
+    Skyddat av API-nyckel.
+    """
+    if x_api_key != settings.scrape_api_key:
+        raise HTTPException(status_code=401, detail="Ogiltig API-nyckel")
+
+    from sqlalchemy import update
+    from datetime import datetime
+
+    # Markera gamla priser som inaktiva
+    await db.execute(
+        update(BuybackPrice)
+        .where(func.lower(BuybackPrice.retailer) == retailer.lower())
+        .values(is_active=False)
+    )
+
+    # Infoga nya priser
+    now = datetime.utcnow()
+    for p in prices:
+        db.add(BuybackPrice(
+            retailer=retailer.lower(),
+            model=p.model,
+            storage_gb=p.storage_gb,
+            condition=p.condition,
+            price_sek=p.price_sek,
+            url=p.url,
+            scraped_at=now,
+            is_active=True,
+        ))
+
+    await db.commit()
+    return {"retailer": retailer, "imported": len(prices), "status": "ok"}
+
+
 @router.post("/scrape", summary="Trigga manuell scraping (körs i bakgrunden)")
 async def trigger_scrape(
     background_tasks: BackgroundTasks,
