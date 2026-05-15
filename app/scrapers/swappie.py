@@ -1,33 +1,84 @@
 """
 Swappie-scraper – cloudscraper + direkt REST API.
 
-Swappie har ett öppet API på /api/sell/api/v3/prices/ som returnerar
-inköpspriser för alla kombinationer av visuellt skick och funktionella fel.
-cloudscraper hanterar Cloudflare-skyddet utan Playwright.
+Swappie exponerar ett öppet API som returnerar inköpspriser för alla kombinationer
+av visuellt skick (5 nivåer) och funktionella fel (16 kombinationer = 2^4 flaggor).
+Totalt 80 rader per modell + lagring.
 
-API-struktur per resultat:
-  - model_name: "iPhone 16 256GB"
-  - visual_condition: SEALED_BOX | LIKE_NEW | ALMOST_NEW | GOOD | MODERATE
-  - functional_condition: [] | [BROKEN] | [BROKEN_SCREEN] | [BATTERY_ISSUE] | kombinationer
-  - price.price: faktiskt bud (SEK)
-  - price.limit_price: garanterat minimum (golvpris)
+─── Condition-nyckelformat (lagras i condition-kolumnen) ─────────────────────
+Utan funktionella fel:  "LIKE_NEW"
+Med funktionella fel:   "LIKE_NEW:B,BAT,BG,BS"   (alfabetisk ordning)
 
-Vi lagrar 5 skicksnivåer per modell/lagring (perfekt skick, inga funktionsfel).
+Funktionskoder:
+  B   = BROKEN        – startar ej (Nej på funktionskontroll)
+  BAT = BATTERY_ISSUE – batterihälsa under 86%
+  BG  = BROKEN_GLASS  – flisor eller kraftiga repor på skärmglas
+  BS  = BROKEN_SCREEN – skärmen fungerar ej (fläckar, pixlar, linjer)
+
+─── visual_condition — mappning från Swappies formulär ───────────────────────
+visual_condition bestäms av det SÄMSTA svaret bland tre ytor:
+  skärmens skick (steg 7) + sidornas skick (steg 8) + baksidans skick (steg 9)
+
+  Formuläralternativ          → API visual_condition
+  ─────────────────────────────────────────────────
+  "Inga tecken på användning" → LIKE_NEW
+  "Minimalt slitage"          → LIKE_NEW
+  "Vissa tecken på slitage"   → ALMOST_NEW
+  "Synligt slitage"           → GOOD
+  "Sprucken eller trasig"     → MODERATE
+
+  SEALED_BOX förekommer i API:et men är inte ett formuläralternativ
+  (avser fabriksförseglat skick).
+
+Verifierat: iPhone 17 256GB, baksida "Vissa tecken" (→ ALMOST_NEW) +
+85% batteri (→ BAT) = ALMOST_NEW:BAT = 6 138 kr ✓ (Swappie.se 2026-05-14)
+
+─── Batterihälsa ─────────────────────────────────────────────────────────────
+Swappie triggar BATTERY_ISSUE när batterihälsan understiger BATTERY_THRESHOLD.
+Gränsen är 86% (verifierat: 85% triggar BAT, 90% triggar inte).
+
+För att slå upp rätt pris på CashMyPhone.se:
+  battery_health >= 86 → condition-nyckel utan BAT
+  battery_health <  86 → lägg till BAT i condition-nyckelns funktionsdel
+
+─── Pris ─────────────────────────────────────────────────────────────────────
+  price       – Swappies bud efter besiktning
+  limit_price – garanterat golvpris (utbetalas oavsett tillstånd)
+  effective   = max(price, limit_price) – detta är vad vi lagrar
+
+─── API-URL ──────────────────────────────────────────────────────────────────
+https://swappie.com/api/sell/api/v3/prices/?model_name={model}&country=SE&storages={json_list}
 """
 import asyncio
-import logging
 import json
-from typing import List, Dict, Any, Optional
+import logging
+import re
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
+
 from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://swappie.com/api/sell/api/v3/prices/"
+COUNTRY = "SE"
+
+# Procent under vilket BATTERY_ISSUE triggas (verifierat: 85% = BAT, 90% = ingen flagga)
+BATTERY_THRESHOLD = 86
+
+# Alla lagringsalternativ Swappie stödjer (irrelevanta storlekar ger tomma resultat)
 ALL_STORAGES = ["64GB", "128GB", "256GB", "512GB", "1TB"]
 
-# Modeller att hämta (Swappies namnformat)
-IPHONE_MODELS = [
+# Förkortningar för funktionella fel i condition-nyckeln
+FUNC_ABBREV: Dict[str, str] = {
+    "BROKEN":        "B",
+    "BATTERY_ISSUE": "BAT",
+    "BROKEN_GLASS":  "BG",
+    "BROKEN_SCREEN": "BS",
+}
+
+# Alla iPhones Swappie tar emot (Swappies namnformat)
+IPHONE_MODELS: List[str] = [
     "iPhone 17 Pro Max", "iPhone 17 Pro", "iPhone 17 Plus", "iPhone 17",
     "iPhone 16 Pro Max", "iPhone 16 Pro", "iPhone 16 Plus", "iPhone 16",
     "iPhone 15 Pro Max", "iPhone 15 Pro", "iPhone 15 Plus", "iPhone 15",
@@ -39,17 +90,35 @@ IPHONE_MODELS = [
     "iPhone XS Max", "iPhone XS", "iPhone XR",
 ]
 
-# Mappar visual_condition till vårt skick-fält
-VISUAL_TO_CONDITION = {
-    "SEALED_BOX": "sealed_box",
-    "LIKE_NEW":   "like_new",
-    "ALMOST_NEW": "almost_new",
-    "GOOD":       "good",
-    "MODERATE":   "moderate",
-}
+SELL_URL = "https://swappie.com/se/salj-din-iphone/"
 
-# Visuella skick vi lagrar (bara "perfekt skick" = inga funktionsfel)
-STORE_VISUAL = set(VISUAL_TO_CONDITION.keys())
+
+def _condition_key(visual: str, functional: List[str]) -> str:
+    """
+    Bygg en kompakt, sorterbar condition-nyckel.
+
+    Exempel:
+      ("LIKE_NEW", [])                              → "LIKE_NEW"
+      ("GOOD", ["BROKEN_SCREEN", "BATTERY_ISSUE"])  → "GOOD:BAT,BS"
+    """
+    if not functional:
+        return visual
+    abbrevs = sorted(FUNC_ABBREV[f] for f in functional if f in FUNC_ABBREV)
+    return f"{visual}:{','.join(abbrevs)}"
+
+
+def _parse_storage_gb(model_name: str) -> Optional[int]:
+    """'iPhone 16 256GB' → 256, 'iPhone 16 1TB' → 1024."""
+    m = re.search(r"(\d+)\s*(GB|TB)$", model_name, re.I)
+    if not m:
+        return None
+    val, unit = int(m.group(1)), m.group(2).upper()
+    return val * 1024 if unit == "TB" else val
+
+
+def _clean_model(model_name: str) -> str:
+    """'iPhone 16 256GB' → 'iPhone 16'."""
+    return re.sub(r"\s+\d+\s*(GB|TB)$", "", model_name, flags=re.I).strip()
 
 
 def _fetch_model_sync(model_name: str) -> List[Dict]:
@@ -60,78 +129,67 @@ def _fetch_model_sync(model_name: str) -> List[Dict]:
         raise RuntimeError("cloudscraper saknas – installera: pip install cloudscraper")
 
     storages_param = json.dumps(ALL_STORAGES)
-    url = f"{API_BASE}?model_name={quote(model_name)}&country=SE&storages={quote(storages_param)}"
+    url = (
+        f"{API_BASE}"
+        f"?model_name={quote(model_name)}"
+        f"&country={COUNTRY}"
+        f"&storages={quote(storages_param)}"
+    )
 
     scraper = cloudscraper.create_scraper(
         browser={"browser": "chrome", "platform": "linux", "mobile": False}
     )
-    resp = scraper.get(url, timeout=20)
+    resp = scraper.get(url, timeout=25)
 
     if resp.status_code != 200:
         logger.debug(f"Swappie: {model_name} → HTTP {resp.status_code}")
         return []
 
-    data = resp.json()
-    results = data.get("results", [])
-    return results
+    return resp.json().get("results", [])
 
 
-def _parse_results(results: List[Dict], model_name: str) -> List[Dict]:
-    """Extrahera priser per visuellt skick (inga funktionsfel)."""
+def _parse_results(results: List[Dict]) -> List[Dict]:
+    """
+    Omvandla rå API-data till prisposter.
+
+    Returnerar en post per unik kombination av (model, storage, condition_key).
+    Priset som lagras är max(price, limit_price) – det faktiska utbetalade beloppet.
+    """
     prices = []
-    url = "https://swappie.com/se/salj-din-iphone/"
 
     for r in results:
-        # Bara rader utan funktionsfel
-        if r.get("functional_condition"):
-            continue
-
         visual = r.get("visual_condition", "")
-        condition = VISUAL_TO_CONDITION.get(visual)
-        if not condition:
+        if not visual:
             continue
 
-        # Extrahera lagring från model_name, t.ex. "iPhone 16 256GB" → 256
-        raw_model = r.get("model_name", "")
-        storage_gb = _parse_storage(raw_model)
+        functional: List[str] = r.get("functional_condition", [])
 
-        price_val = r.get("price", {}).get("price", 0)
+        raw_model = r.get("model_name", "")
+        storage_gb = _parse_storage_gb(raw_model)
+        clean_model = _clean_model(raw_model)
+
+        price_data = r.get("price", {})
         try:
-            price = int(price_val)
+            offered = float(price_data.get("price", 0))
+            floor = float(price_data.get("limit_price", 0))
         except (ValueError, TypeError):
             continue
 
-        if price < 100:
+        effective = max(offered, floor)
+        if effective < 1:
             continue
 
-        # Rensa modellnamnet (ta bort lagring från slutet)
-        clean_model = _clean_model_name(raw_model)
+        condition = _condition_key(visual, functional)
 
         prices.append({
-            "model": clean_model,
+            "model":      clean_model,
             "storage_gb": storage_gb,
-            "condition": condition,
-            "price_sek": price,
-            "url": url,
+            "condition":  condition,
+            "price_sek":  round(effective),
+            "url":        SELL_URL,
         })
 
     return prices
-
-
-def _parse_storage(model_name: str) -> Optional[int]:
-    """'iPhone 16 256GB' → 256, 'iPhone 16 1TB' → 1024."""
-    import re
-    m = re.search(r"(\d+)\s*(GB|TB)$", model_name, re.I)
-    if not m:
-        return None
-    val, unit = int(m.group(1)), m.group(2).upper()
-    return val * 1024 if unit == "TB" else val
-
-
-def _clean_model_name(model_name: str) -> str:
-    """'iPhone 16 256GB' → 'iPhone 16'."""
-    import re
-    return re.sub(r"\s+\d+\s*(GB|TB)$", "", model_name, flags=re.I).strip()
 
 
 class SwappieScraper(BaseScraper):
@@ -141,25 +199,28 @@ class SwappieScraper(BaseScraper):
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         logger.info(f"Swappie: hämtar {len(IPHONE_MODELS)} modeller parallellt...")
 
-        # Kör synkrona cloudscraper-anrop parallellt i threadpool
         tasks = [
             asyncio.to_thread(_fetch_model_sync, model)
             for model in IPHONE_MODELS
         ]
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        prices = []
-        found = 0
+        prices: List[Dict] = []
+        found_models = 0
+
         for model_name, result in zip(IPHONE_MODELS, raw_results):
             if isinstance(result, Exception):
                 logger.debug(f"Swappie: fel för {model_name}: {result}")
                 continue
             if not result:
                 continue
-            parsed = _parse_results(result, model_name)
+            parsed = _parse_results(result)
             if parsed:
-                found += 1
+                found_models += 1
             prices.extend(parsed)
 
-        logger.info(f"Swappie: {len(prices)} priser från {found} modeller")
+        logger.info(
+            f"Swappie: {len(prices)} priser "
+            f"({found_models} modeller, ~{len(prices) // max(found_models, 1)} kombiner/modell)"
+        )
         return prices

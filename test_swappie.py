@@ -1,66 +1,103 @@
 """
-Lokal test: kör Swappie-scrapern och visa resultatet.
-Kör: python test_swappie.py
+Lokal test: kör Swappie-scrapern och visa hela primatrisen.
+
+Användning:
+  python test_swappie.py                   # alla modeller
+  python test_swappie.py "iPhone 17"       # filtrera på modell
+  python test_swappie.py "iPhone 17" 256   # filtrera på modell + lagring
+
+Condition-nyckelformat:
+  LIKE_NEW              → perfekt skick, inga funktionella fel
+  LIKE_NEW:BAT          → perfekt skick, batteri under 80%
+  GOOD:B,BS             → bra skick, startar ej + trasig skärm
+  Koder: B=startar ej, BAT=batteri<80%, BG=krackelerat glas, BS=trasig skärm
 """
 import asyncio
 import sys
 import os
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:////tmp/test.db")
 
-from app.scrapers.swappie import SwappieScraper
+from collections import defaultdict
+from app.scrapers.swappie import SwappieScraper, BATTERY_THRESHOLD
+
+VISUAL_ORDER = ["SEALED_BOX", "LIKE_NEW", "ALMOST_NEW", "GOOD", "MODERATE"]
+VISUAL_LABELS = {
+    "SEALED_BOX":  "Förseglad",
+    "LIKE_NEW":    "Som ny",
+    "ALMOST_NEW":  "Nästan ny",
+    "GOOD":        "Bra skick",
+    "MODERATE":    "Godkänt",
+}
+
+FUNC_LABELS = {
+    "B":   "Startar ej",
+    "BAT": f"Batteri <{BATTERY_THRESHOLD}% (battery issue)",
+    "BG":  "Krackelerat glas",
+    "BS":  "Trasig skärm",
+}
+
+
+def parse_condition(cond: str):
+    """'GOOD:B,BS' → ('GOOD', ['B', 'BS'])"""
+    if ":" in cond:
+        visual, rest = cond.split(":", 1)
+        return visual, rest.split(",")
+    return cond, []
+
 
 async def main():
     model_filter = sys.argv[1] if len(sys.argv) > 1 else None
-    scraper = SwappieScraper()
+    storage_filter = int(sys.argv[2]) if len(sys.argv) > 2 else None
 
-    print(f"Kör Swappie-scraper{f' för {model_filter}' if model_filter else ' (alla modeller)'}...")
+    label = f" för '{model_filter}'" if model_filter else " (alla modeller)"
+    if storage_filter:
+        label += f" {storage_filter}GB"
+    print(f"Kör Swappie-scraper{label}...")
+
+    scraper = SwappieScraper()
     prices = await scraper.fetch_prices()
 
+    # Filtrera
     if model_filter:
         prices = [p for p in prices if model_filter.lower() in p["model"].lower()]
+    if storage_filter:
+        prices = [p for p in prices if p["storage_gb"] == storage_filter]
 
     if not prices:
         print("Inga priser hittades.")
         return
 
-    # Gruppera per modell
-    from collections import defaultdict
-    by_model = defaultdict(list)
+    # Gruppera per (model, storage)
+    by_model_storage: dict = defaultdict(list)
     for p in prices:
-        by_model[p["model"]].append(p)
+        by_model_storage[(p["model"], p["storage_gb"])].append(p)
 
-    print(f"\n{'='*55}")
-    print(f"  Totalt: {len(prices)} priser för {len(by_model)} modeller")
-    print(f"{'='*55}")
+    print(f"\nTotalt: {len(prices)} priser för {len(by_model_storage)} modell/lagrings-kombinationer")
+    print(f"Condition-format: VISUELLT_SKICK  eller  VISUELLT_SKICK:FELKODER")
+    print(f"Batterigräns: {BATTERY_THRESHOLD}% (under = BAT-flagga)")
 
-    CONDITION_ORDER = ["sealed_box", "like_new", "almost_new", "good", "moderate"]
-    CONDITION_LABELS = {
-        "sealed_box":  "Förseglad låda",
-        "like_new":    "Som ny",
-        "almost_new":  "Nästan ny",
-        "good":        "Bra skick",
-        "moderate":    "Godkänt skick",
-    }
+    for (model, storage_gb) in sorted(by_model_storage.keys()):
+        model_prices = by_model_storage[(model, storage_gb)]
+        storage_label = f"{storage_gb}GB" if storage_gb else "?"
+        print(f"\n{'='*65}")
+        print(f"  {model} {storage_label}  ({len(model_prices)} kombinationer)")
+        print(f"{'='*65}")
+        print(f"  {'Condition-nyckel':<30} {'Pris (SEK)':>10}  Beskrivning")
+        print(f"  {'-'*60}")
 
-    for model in sorted(by_model.keys()):
-        model_prices = by_model[model]
-        storages = sorted(set(p["storage_gb"] for p in model_prices if p["storage_gb"]))
-        print(f"\n{model}")
-        header = f"  {'Skick':<18}" + "".join(f"{s}GB".rjust(9) for s in storages)
-        print(header)
-        print("  " + "-" * (16 + 9 * len(storages)))
-        for cond in CONDITION_ORDER:
-            row_prices = {
-                p["storage_gb"]: p["price_sek"]
-                for p in model_prices if p["condition"] == cond
-            }
-            if not row_prices:
-                continue
-            label = CONDITION_LABELS.get(cond, cond)
-            row = f"  {label:<18}" + "".join(
-                f"{row_prices.get(s, '-'):>8} " for s in storages
-            )
-            print(row)
+        # Sortera: visuellt skick i VISUAL_ORDER, sedan antal fel (färre fel = bättre)
+        def sort_key(p):
+            visual, funcs = parse_condition(p["condition"])
+            vi = VISUAL_ORDER.index(visual) if visual in VISUAL_ORDER else 99
+            return (vi, len(funcs), sorted(funcs))
+
+        for p in sorted(model_prices, key=sort_key):
+            visual, funcs = parse_condition(p["condition"])
+            func_desc = " + ".join(FUNC_LABELS.get(f, f) for f in sorted(funcs))
+            visual_label = VISUAL_LABELS.get(visual, visual)
+            desc = visual_label + (f", {func_desc}" if func_desc else "")
+            print(f"  {p['condition']:<30} {p['price_sek']:>10}  {desc}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

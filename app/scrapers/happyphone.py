@@ -76,23 +76,28 @@ HEADERS = {
 CONDITIONS = ["like_new", "very_good", "good", "acceptable"]
 MIN_PRICE = 1
 
-# Kända säljslugar (har data-calc) — används som fallback om sitatemap är otillgänglig.
-# Uppdatera vid nya modeller om sitatemap fortsätter vara otillgänglig.
+# Verifierade säljslugar (har data-calc) — används som fallback om sitatemap är otillgänglig.
+# OBS: flera modeller har slug-suffix "-2" för säljsidan (köpsidan saknar suffixet).
+# Verifierat manuellt 2026-05-15.
 FALLBACK_SLUGS: List[str] = [
-    "iphone-11", "iphone-11-2",
+    "iphone-11-2",                                    # iPhone 11 (iphone-11 = köpsida)
     "iphone-11-pro", "iphone-11-pro-max",
     "iphone-12", "iphone-12-mini", "iphone-12-pro", "iphone-12-pro-max",
-    "iphone-13-2", "iphone-13-mini", "iphone-13-mini-2",
-    "iphone-13-pro", "iphone-13-pro-2", "iphone-13-pro-max", "iphone-13-pro-max-2",
+    "iphone-13-2",                                    # iPhone 13 (iphone-13 = köpsida)
+    "iphone-13-mini", "iphone-13-mini-2",
+    "iphone-13-pro-2",                                # iPhone 13 Pro (iphone-13-pro = köpsida)
+    "iphone-13-pro-max-2",                            # iPhone 13 Pro Max (iphone-13-pro-max = köpsida)
     "iphone-14", "iphone-14-plus", "iphone-14-pro", "iphone-14-pro-max",
     "iphone-15", "iphone-15-plus", "iphone-15-pro", "iphone-15-pro-max",
     "iphone-16", "iphone-16-plus", "iphone-16-pro", "iphone-16-pro-max",
     "iphone-16e",
     "iphone-17", "iphone-17-pro", "iphone-17-pro-max",
     "iphone-air",
-    "iphone-se-2020", "iphone-se-2020-2",
+    "iphone-se-2020-2",                               # iPhone SE 2020 (iphone-se-2020 = köpsida)
     "iphone-se-2022",
-    "iphone-x", "iphone-xr", "iphone-xs", "iphone-xs-2", "iphone-xs-max",
+    "iphone-x", "iphone-xr",
+    "iphone-xs-2",                                    # iPhone XS (iphone-xs = köpsida)
+    "iphone-xs-max",
 ]
 
 
@@ -296,7 +301,8 @@ class HappyPhoneScraper(BaseScraper):
 
             logger.info(f"HappyPhone: {len(slugs)} kandidater — hämtar och filtrerar parallellt")
 
-            sem = asyncio.Semaphore(8)
+            # Låg concurrency — Cloudflare throttlar HappyPhone vid för många parallella requests
+            sem = asyncio.Semaphore(3)
 
             async def fetch_model(slug: str) -> Optional[Tuple[str, Dict]]:
                 async with sem:
@@ -378,15 +384,26 @@ class HappyPhoneScraper(BaseScraper):
     async def _fetch_model(
         self, client: httpx.AsyncClient, slug: str
     ) -> Optional[Tuple[str, Dict]]:
-        """Hämta en produktsida och returnera (modellnamn, calc-dict) om det är en säljsida."""
-        try:
-            resp = await client.get(f"{PRODUCT_URL}{slug}/")
-            if resp.status_code != 200:
+        """
+        Hämta en produktsida och returnera (modellnamn, calc-dict) om det är en säljsida.
+        Försöker upp till 3 gånger med backoff — Cloudflare kan returnera challenge-sidor
+        vid hög last som ser ut som 200 men saknar data-calc.
+        """
+        for attempt in range(3):
+            try:
+                if attempt > 0:
+                    await asyncio.sleep(2 ** attempt)
+                resp = await client.get(f"{PRODUCT_URL}{slug}/")
+                if resp.status_code != 200:
+                    return None
+                data = _parse_model_page(resp.text, slug)
+                if data is not None:
+                    return data["model_name"], data["calc"]
+                # 200 men ingen data-calc — kan vara Cloudflare challenge, försök igen
+                if attempt < 2:
+                    logger.debug(f"HappyPhone: ingen data-calc för {slug} (försök {attempt + 1}/3)")
+                    continue
                 return None
-            data = _parse_model_page(resp.text, slug)
-            if data is None:
-                return None
-            return data["model_name"], data["calc"]
-        except Exception as e:
-            logger.debug(f"HappyPhone: fel för {slug}: {e}")
-            return None
+            except Exception as e:
+                logger.debug(f"HappyPhone: fel för {slug} (försök {attempt + 1}/3): {e}")
+        return None

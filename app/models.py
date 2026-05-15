@@ -16,7 +16,7 @@ class BuybackPrice(Base):
     retailer: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     model: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     storage_gb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    condition: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    condition: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     price_sek: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="SEK")
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
