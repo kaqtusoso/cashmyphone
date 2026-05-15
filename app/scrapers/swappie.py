@@ -131,7 +131,8 @@ def _clean_model(model_name: str) -> str:
 async def _fetch_all_models_playwright() -> List[Dict]:
     """
     Startar headless Chrome via Playwright, löser Cloudflare JS-challenge på
-    Swappies säljsida och hämtar sedan alla modeller via samma browser-context.
+    Swappies säljsida och hämtar sedan alla modeller via page.evaluate() —
+    fetch() körs inne i webbläsarens JS-kontext (rätt cookies, rätt TLS).
     """
     all_results: List[Dict] = []
 
@@ -140,60 +141,49 @@ async def _fetch_all_models_playwright() -> List[Dict]:
             headless=True,
             args=["--no-sandbox", "--disable-setuid-sandbox"],
         )
-        context = await browser.new_context(
-            locale="sv-SE",
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/130.0.0.0 Safari/537.36"
-            ),
-        )
+        page = await browser.new_page()
 
-        # Navigera till säljsidan — löser Cloudflare JS-challenge och sätter cf_clearance
-        page = await context.new_page()
+        # Navigera till säljsidan — löser Cloudflare JS-challenge
         try:
             await page.goto(SELL_URL, wait_until="domcontentloaded", timeout=30_000)
-            await page.wait_for_timeout(3_000)  # Vänta på CF-challenge
+            await page.wait_for_timeout(5_000)  # Vänta tills CF-challenge löst
+            title = await page.title()
+            logger.info(f"Swappie: page title = {title!r}")
         except Exception as e:
-            logger.warning(f"Swappie: kunde inte ladda säljsidan: {e}")
+            logger.warning(f"Swappie: navigation misslyckades: {e}")
             await browser.close()
             return []
 
-        # Hämta alla modeller via context.request (bär med CF-cookies)
+        # Hämta varje modell via fetch() i webbläsarens JS-kontext
         storages_param = json.dumps(ALL_STORAGES)
-        sem = asyncio.Semaphore(3)
 
-        async def fetch_one(model_name: str) -> List[Dict]:
-            async with sem:
-                url = (
-                    f"{API_BASE}"
-                    f"?model_name={quote(model_name)}"
-                    f"&country={COUNTRY}"
-                    f"&storages={quote(storages_param)}"
+        for model_name in IPHONE_MODELS:
+            url = (
+                f"{API_BASE}"
+                f"?model_name={quote(model_name)}"
+                f"&country={COUNTRY}"
+                f"&storages={quote(storages_param)}"
+            )
+            try:
+                data = await page.evaluate(
+                    """async (url) => {
+                        try {
+                            const r = await fetch(url, {
+                                headers: { 'Accept': 'application/json' }
+                            });
+                            if (!r.ok) return null;
+                            return await r.json();
+                        } catch (e) { return null; }
+                    }""",
+                    url,
                 )
-                try:
-                    resp = await context.request.get(
-                        url,
-                        headers={
-                            "Accept": "application/json",
-                            "Referer": SELL_URL,
-                        },
-                        timeout=15_000,
-                    )
-                    if resp.status != 200:
-                        logger.debug(f"Swappie: {model_name} → HTTP {resp.status}")
-                        return []
-                    data = await resp.json()
-                    return data.get("results", [])
-                except Exception as e:
-                    logger.debug(f"Swappie: fel för {model_name}: {e}")
-                    return []
-                finally:
-                    await asyncio.sleep(0.3)
-
-        raw = await asyncio.gather(*[fetch_one(m) for m in IPHONE_MODELS])
-        for results in raw:
-            all_results.extend(results)
+                if data:
+                    results = data.get("results", [])
+                    all_results.extend(results)
+                    logger.debug(f"Swappie: {model_name} → {len(results)} resultat")
+            except Exception as e:
+                logger.debug(f"Swappie: {model_name}: {e}")
+            await asyncio.sleep(0.2)
 
         await browser.close()
 
