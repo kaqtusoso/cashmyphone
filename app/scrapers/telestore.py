@@ -36,9 +36,9 @@ Format: {skick}  eller  {skick}:bat  eller  {skick}:sidor  eller  {skick}:bat:si
   :bat      = batterihälsa under 85%
   :sidor    = sidor eller baksida trasig
 
-Vi lagrar INTE kombinationer där telefonen inte fungerar (19) eller är
-böjd/vattenskadad (22). Kombinationer som ger 60 kr (t.ex. okej + sidor trasiga)
-lagras däremot — 60 kr är fortfarande ett giltigt bud.
+Vi lagrar INTE kombinationer där telefonen inte fungerar (19).
+Böjd/vattenskadad (22) lagras som "water_damaged" — Telestore erbjuder 60 kr
+och det är ett accepterat bud hos CashMyPhone.
 """
 import asyncio
 import logging
@@ -75,6 +75,7 @@ CRIT_BATTERI     = 26  # Batterihälsa ≥85%?
 
 OPT_FUNGERAR_JA  = 18
 OPT_VATTEN_NEJ   = 21
+OPT_VATTEN_JA    = 22   # Böjd/vattenskadad → alltid 60 kr
 OPT_BATTERI_OK   = 48   # Ja, ≥85%
 OPT_BATTERI_LAG  = 49   # Nej, <85%
 OPT_SIDOR_OK     = 34   # Nej, ej trasig
@@ -210,6 +211,28 @@ class TelestoreScraper(BaseScraper):
                     continue
                 prices.append(result)
 
+            # Steg 4: Hämta water_damaged-priset (60 kr) per modell och lagring
+            water_tasks = []
+            for slug, result in zip(slugs, model_results):
+                if isinstance(result, Exception) or result is None:
+                    continue
+                for storage in result["storages"]:
+                    water_tasks.append((slug, result, storage))
+
+            async def fetch_water(task):
+                async with price_sem:
+                    slug, model, storage = task
+                    return await self._fetch_water_damaged(client, slug, model, storage)
+
+            water_results = await asyncio.gather(
+                *[fetch_water(t) for t in water_tasks],
+                return_exceptions=True,
+            )
+            for result in water_results:
+                if isinstance(result, Exception) or result is None:
+                    continue
+                prices.append(result)
+
             logger.info(f"Telestore: {len(prices)} priser sparade")
             return prices
 
@@ -284,4 +307,50 @@ class TelestoreScraper(BaseScraper):
             }
         except Exception as e:
             logger.debug(f"Telestore: prisfel {slug} {storage.get('space')}GB: {e}")
+            return None
+
+    async def _fetch_water_damaged(
+        self,
+        client: httpx.AsyncClient,
+        slug: str,
+        model: Dict,
+        storage: Dict,
+    ) -> Optional[Dict]:
+        """
+        Hämta priset för böjd/vattenskadad telefon (option 22).
+        Telestore returnerar alltid 60 kr oavsett skick — vi skickar nyskick
+        som bas men det spelar ingen roll för slutpriset.
+        """
+        try:
+            options = [
+                {"criteriaID": CRIT_FUNGERAR, "id": OPT_FUNGERAR_JA,  "isSlider": 0},
+                {"criteriaID": CRIT_VATTEN,   "id": OPT_VATTEN_JA,    "isSlider": 0},
+                {"criteriaID": CRIT_SKICK,    "id": 27,               "isSlider": 0},  # nyskick
+                {"criteriaID": CRIT_SIDOR,    "id": OPT_SIDOR_OK,     "isSlider": 0},
+                {"criteriaID": CRIT_BATTERI,  "id": OPT_BATTERI_OK,   "isSlider": 0},
+            ]
+            url = f"{SELL_URL}{slug}/?action=ajax-get-price"
+            resp = await client.post(url, data={
+                "storageID": storage["id"],
+                "unitID":    model["unit_id"],
+                "options":   json.dumps(options),
+            }, headers={**HEADERS, "Referer": f"{SELL_URL}{slug}/"})
+
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            price = data.get("price")
+            if not price or float(price) < MIN_PRICE:
+                return None
+
+            return {
+                "model":      f"iPhone {model['unit_name']}",
+                "storage_gb": _storage_gb(storage["space"]),
+                "condition":  "water_damaged",
+                "price_sek":  round(float(price)),
+                "url":        f"{SELL_URL}{slug}/",
+            }
+        except Exception as e:
+            logger.debug(f"Telestore: water_damaged-fel {slug}: {e}")
             return None

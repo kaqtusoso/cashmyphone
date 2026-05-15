@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from typing import Optional, List
+from pydantic import BaseModel
 from ..database import get_db
 from ..models import BuybackPrice, PriceOut, BestOffer, ScrapeStatusOut
+from ..pricing.crosswalk import FormAnswers, all_conditions
 from ..config import settings
 
 router = APIRouter(prefix="/api", tags=["prices"])
@@ -99,6 +101,131 @@ async def get_retailers(db: AsyncSession = Depends(get_db)):
         .order_by(BuybackPrice.retailer)
     )
     return [row[0] for row in result.all()]
+
+
+# ─── /api/quote ──────────────────────────────────────────────────────────────
+
+class QuoteRequest(BaseModel):
+    """Formulärsvar från CashMyPhone — en iPhone utvärderas."""
+    model: str
+    storage_gb: int
+    screen_surface:   str          # LIKE_NEW | ALMOST_NEW | GOOD | MODERATE
+    sides_surface:    str
+    back_surface:     str
+    is_broken:        bool = False
+    is_screen_broken: bool = False
+    is_glass_broken:  bool = False
+    is_battery_low:   bool = False
+    is_water_damaged: bool = False
+
+
+class RetailerQuote(BaseModel):
+    retailer:      str
+    condition_key: str
+    price_sek:     int
+    url:           Optional[str]
+
+
+class QuoteResponse(BaseModel):
+    model:      str
+    storage_gb: int
+    quotes:     List[RetailerQuote]
+    best_price: Optional[int]
+    best_retailer: Optional[str]
+
+
+@router.post(
+    "/quote",
+    response_model=QuoteResponse,
+    summary="Hämta bud från alla återförsäljare för ett formulärsvar",
+    description=(
+        "Tar in formulärsvar (modell, lagring, ytskick, funktionsflaggor) "
+        "och returnerar det bästa budet från varje återförsäljare som köper "
+        "den kombinationen, sorterat fallande på pris."
+    ),
+)
+async def get_quote(
+    req: QuoteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Normalisera modellnamnet (lägg till "iPhone " om det saknas)
+    model_normalized = req.model.strip()
+    if not model_normalized.lower().startswith("iphone"):
+        model_normalized = f"iPhone {model_normalized}"
+
+    # 2. Bygg FormAnswers och slå upp condition-nycklar
+    answers = FormAnswers(
+        screen_surface=req.screen_surface.upper(),
+        sides_surface=req.sides_surface.upper(),
+        back_surface=req.back_surface.upper(),
+        is_broken=req.is_broken,
+        is_screen_broken=req.is_screen_broken,
+        is_glass_broken=req.is_glass_broken,
+        is_battery_low=req.is_battery_low,
+        is_water_damaged=req.is_water_damaged,
+    )
+    conditions = all_conditions(answers)  # {retailer: condition_key | None}
+
+    # 3. Hämta det bästa (högsta) priset per återförsäljare i ett enda DB-anrop
+    #    Bygg OR-filter: (retailer='swappie' AND condition='…') OR …
+    retailer_filters = []
+    active_retailers: List[str] = []  # de som faktiskt lägger bud
+    for retailer, ckey in conditions.items():
+        if ckey is None:
+            continue  # t.ex. Telestore om enheten inte fungerar
+        active_retailers.append(retailer)
+        retailer_filters.append(
+            and_(
+                func.lower(BuybackPrice.retailer)  == retailer,
+                func.lower(BuybackPrice.condition) == ckey.lower(),
+                func.lower(BuybackPrice.model).contains(model_normalized.lower()),
+                BuybackPrice.storage_gb == req.storage_gb,
+                BuybackPrice.is_active == True,
+            )
+        )
+
+    if not retailer_filters:
+        # Ingen återförsäljare lägger bud (t.ex. enheten fungerar inte)
+        return QuoteResponse(
+            model=model_normalized,
+            storage_gb=req.storage_gb,
+            quotes=[],
+            best_price=None,
+            best_retailer=None,
+        )
+
+    result = await db.execute(
+        select(BuybackPrice)
+        .where(or_(*retailer_filters))
+        .order_by(BuybackPrice.retailer, BuybackPrice.price_sek.desc())
+    )
+    rows = result.scalars().all()
+
+    # 4. Plocka bästa priset per återförsäljare (första i fallande ordning)
+    seen: set = set()
+    quotes: List[RetailerQuote] = []
+    for row in rows:
+        if row.retailer in seen:
+            continue
+        seen.add(row.retailer)
+        quotes.append(RetailerQuote(
+            retailer=row.retailer,
+            condition_key=conditions[row.retailer],
+            price_sek=row.price_sek,
+            url=row.url,
+        ))
+
+    # Sortera fallande på pris
+    quotes.sort(key=lambda q: q.price_sek, reverse=True)
+
+    best = quotes[0] if quotes else None
+    return QuoteResponse(
+        model=model_normalized,
+        storage_gb=req.storage_gb,
+        quotes=quotes,
+        best_price=best.price_sek if best else None,
+        best_retailer=best.retailer if best else None,
+    )
 
 
 @router.post("/scrape", response_model=List[ScrapeStatusOut], summary="Trigga manuell scraping")
