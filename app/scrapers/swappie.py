@@ -123,6 +123,21 @@ def _clean_model(model_name: str) -> str:
     return re.sub(r"\s+\d+\s*(GB|TB)$", "", model_name, flags=re.I).strip()
 
 
+HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "sv-SE,sv;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://swappie.com/se/salj-din-iphone/",
+    "Origin": "https://swappie.com",
+    "sec-ch-ua": '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+}
+
+
 async def _fetch_model(session: AsyncSession, model_name: str) -> List[Dict]:
     """Asynkront API-anrop via curl_cffi — imiterar Chromes TLS-fingeravtryck."""
     storages_param = json.dumps(ALL_STORAGES)
@@ -133,7 +148,10 @@ async def _fetch_model(session: AsyncSession, model_name: str) -> List[Dict]:
         f"&storages={quote(storages_param)}"
     )
     try:
-        resp = await session.get(url, timeout=25)
+        resp = await session.get(url, headers=HEADERS, timeout=25)
+        if resp.status_code == 403:
+            logger.warning(f"Swappie: {model_name} → 403 Forbidden (Cloudflare block)")
+            return []
         if resp.status_code != 200:
             logger.debug(f"Swappie: {model_name} → HTTP {resp.status_code}")
             return []
@@ -194,7 +212,7 @@ class SwappieScraper(BaseScraper):
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         logger.info(f"Swappie: hämtar {len(IPHONE_MODELS)} modeller parallellt...")
 
-        async with AsyncSession(impersonate="chrome120") as session:
+        async with AsyncSession(impersonate="chrome130") as session:
             sem = asyncio.Semaphore(3)
 
             async def fetch_with_sem(model: str) -> List[Dict]:
