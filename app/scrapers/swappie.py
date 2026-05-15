@@ -1,5 +1,10 @@
 """
-Swappie-scraper – cloudscraper + direkt REST API.
+Swappie-scraper – Playwright + direkt REST API.
+
+Swappie's API är skyddat av Cloudflare som blockerar datacenter-IP:er.
+Lösning: Playwright startar en riktig headless Chrome, navigerar till Swappies
+sida för att lösa Cloudflare JS-challenge och hämta cf_clearance-cookies,
+sedan görs API-anropen via samma browser-context (med rätt cookies + TLS).
 
 Swappie exponerar ett öppet API som returnerar inköpspriser för alla kombinationer
 av visuellt skick (5 nivåer) och funktionella fel (16 kombinationer = 2^4 flaggor).
@@ -56,7 +61,7 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
-from curl_cffi.requests import AsyncSession
+from playwright.async_api import async_playwright
 
 from .base import BaseScraper
 
@@ -123,42 +128,76 @@ def _clean_model(model_name: str) -> str:
     return re.sub(r"\s+\d+\s*(GB|TB)$", "", model_name, flags=re.I).strip()
 
 
-HEADERS = {
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "sv-SE,sv;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://swappie.com/se/salj-din-iphone/",
-    "Origin": "https://swappie.com",
-    "sec-ch-ua": '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-origin",
-}
+async def _fetch_all_models_playwright() -> List[Dict]:
+    """
+    Startar headless Chrome via Playwright, löser Cloudflare JS-challenge på
+    Swappies säljsida och hämtar sedan alla modeller via samma browser-context.
+    """
+    all_results: List[Dict] = []
 
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
+        )
+        context = await browser.new_context(
+            locale="sv-SE",
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/130.0.0.0 Safari/537.36"
+            ),
+        )
 
-async def _fetch_model(session: AsyncSession, model_name: str) -> List[Dict]:
-    """Asynkront API-anrop via curl_cffi — imiterar Chromes TLS-fingeravtryck."""
-    storages_param = json.dumps(ALL_STORAGES)
-    url = (
-        f"{API_BASE}"
-        f"?model_name={quote(model_name)}"
-        f"&country={COUNTRY}"
-        f"&storages={quote(storages_param)}"
-    )
-    try:
-        resp = await session.get(url, headers=HEADERS, timeout=25)
-        if resp.status_code == 403:
-            logger.warning(f"Swappie: {model_name} → 403 Forbidden (Cloudflare block)")
+        # Navigera till säljsidan — löser Cloudflare JS-challenge och sätter cf_clearance
+        page = await context.new_page()
+        try:
+            await page.goto(SELL_URL, wait_until="domcontentloaded", timeout=30_000)
+            await page.wait_for_timeout(3_000)  # Vänta på CF-challenge
+        except Exception as e:
+            logger.warning(f"Swappie: kunde inte ladda säljsidan: {e}")
+            await browser.close()
             return []
-        if resp.status_code != 200:
-            logger.debug(f"Swappie: {model_name} → HTTP {resp.status_code}")
-            return []
-        return resp.json().get("results", [])
-    except Exception as e:
-        logger.debug(f"Swappie: fel för {model_name}: {e}")
-        return []
+
+        # Hämta alla modeller via context.request (bär med CF-cookies)
+        storages_param = json.dumps(ALL_STORAGES)
+        sem = asyncio.Semaphore(3)
+
+        async def fetch_one(model_name: str) -> List[Dict]:
+            async with sem:
+                url = (
+                    f"{API_BASE}"
+                    f"?model_name={quote(model_name)}"
+                    f"&country={COUNTRY}"
+                    f"&storages={quote(storages_param)}"
+                )
+                try:
+                    resp = await context.request.get(
+                        url,
+                        headers={
+                            "Accept": "application/json",
+                            "Referer": SELL_URL,
+                        },
+                        timeout=15_000,
+                    )
+                    if resp.status != 200:
+                        logger.debug(f"Swappie: {model_name} → HTTP {resp.status}")
+                        return []
+                    data = await resp.json()
+                    return data.get("results", [])
+                except Exception as e:
+                    logger.debug(f"Swappie: fel för {model_name}: {e}")
+                    return []
+                finally:
+                    await asyncio.sleep(0.3)
+
+        raw = await asyncio.gather(*[fetch_one(m) for m in IPHONE_MODELS])
+        for results in raw:
+            all_results.extend(results)
+
+        await browser.close()
+
+    return all_results
 
 
 def _parse_results(results: List[Dict]) -> List[Dict]:
@@ -210,32 +249,12 @@ class SwappieScraper(BaseScraper):
     retailer_name = "Swappie"
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
-        logger.info(f"Swappie: hämtar {len(IPHONE_MODELS)} modeller parallellt...")
+        logger.info(f"Swappie: startar Playwright för {len(IPHONE_MODELS)} modeller...")
 
-        async with AsyncSession(impersonate="chrome130") as session:
-            sem = asyncio.Semaphore(3)
+        raw_results = await _fetch_all_models_playwright()
 
-            async def fetch_with_sem(model: str) -> List[Dict]:
-                async with sem:
-                    result = await _fetch_model(session, model)
-                    await asyncio.sleep(0.5)  # Undvika rate-limiting
-                    return result
-
-            raw_results = await asyncio.gather(
-                *[fetch_with_sem(m) for m in IPHONE_MODELS],
-                return_exceptions=True,
-            )
-
-        prices: List[Dict] = []
-        found_models = 0
-
-        for model_name, result in zip(IPHONE_MODELS, raw_results):
-            if isinstance(result, Exception) or not result:
-                continue
-            parsed = _parse_results(result)
-            if parsed:
-                found_models += 1
-            prices.extend(parsed)
+        prices = _parse_results(raw_results)
+        found_models = len({p["model"] for p in prices})
 
         logger.info(
             f"Swappie: {len(prices)} priser "
