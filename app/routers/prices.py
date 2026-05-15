@@ -178,7 +178,7 @@ async def get_quote(
             and_(
                 func.lower(BuybackPrice.retailer)  == retailer,
                 func.lower(BuybackPrice.condition) == ckey.lower(),
-                func.lower(BuybackPrice.model).contains(model_normalized.lower()),
+                func.lower(BuybackPrice.model) == model_normalized.lower(),
                 BuybackPrice.storage_gb == req.storage_gb,
                 BuybackPrice.is_active == True,
             )
