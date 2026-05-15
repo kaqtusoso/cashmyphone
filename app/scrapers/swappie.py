@@ -195,11 +195,13 @@ class SwappieScraper(BaseScraper):
         logger.info(f"Swappie: hämtar {len(IPHONE_MODELS)} modeller parallellt...")
 
         async with AsyncSession(impersonate="chrome120") as session:
-            sem = asyncio.Semaphore(8)
+            sem = asyncio.Semaphore(3)
 
             async def fetch_with_sem(model: str) -> List[Dict]:
                 async with sem:
-                    return await _fetch_model(session, model)
+                    result = await _fetch_model(session, model)
+                    await asyncio.sleep(0.5)  # Undvika rate-limiting
+                    return result
 
             raw_results = await asyncio.gather(
                 *[fetch_with_sem(m) for m in IPHONE_MODELS],
