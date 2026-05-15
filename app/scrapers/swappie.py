@@ -56,6 +56,8 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
+from curl_cffi.requests import AsyncSession
+
 from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
@@ -121,13 +123,8 @@ def _clean_model(model_name: str) -> str:
     return re.sub(r"\s+\d+\s*(GB|TB)$", "", model_name, flags=re.I).strip()
 
 
-def _fetch_model_sync(model_name: str) -> List[Dict]:
-    """Synkront API-anrop via cloudscraper (körs i threadpool)."""
-    try:
-        import cloudscraper
-    except ImportError:
-        raise RuntimeError("cloudscraper saknas – installera: pip install cloudscraper")
-
+async def _fetch_model(session: AsyncSession, model_name: str) -> List[Dict]:
+    """Asynkront API-anrop via curl_cffi — imiterar Chromes TLS-fingeravtryck."""
     storages_param = json.dumps(ALL_STORAGES)
     url = (
         f"{API_BASE}"
@@ -135,17 +132,15 @@ def _fetch_model_sync(model_name: str) -> List[Dict]:
         f"&country={COUNTRY}"
         f"&storages={quote(storages_param)}"
     )
-
-    scraper = cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "linux", "mobile": False}
-    )
-    resp = scraper.get(url, timeout=25)
-
-    if resp.status_code != 200:
-        logger.debug(f"Swappie: {model_name} → HTTP {resp.status_code}")
+    try:
+        resp = await session.get(url, timeout=25)
+        if resp.status_code != 200:
+            logger.debug(f"Swappie: {model_name} → HTTP {resp.status_code}")
+            return []
+        return resp.json().get("results", [])
+    except Exception as e:
+        logger.debug(f"Swappie: fel för {model_name}: {e}")
         return []
-
-    return resp.json().get("results", [])
 
 
 def _parse_results(results: List[Dict]) -> List[Dict]:
@@ -199,20 +194,23 @@ class SwappieScraper(BaseScraper):
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         logger.info(f"Swappie: hämtar {len(IPHONE_MODELS)} modeller parallellt...")
 
-        tasks = [
-            asyncio.to_thread(_fetch_model_sync, model)
-            for model in IPHONE_MODELS
-        ]
-        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+        async with AsyncSession(impersonate="chrome120") as session:
+            sem = asyncio.Semaphore(8)
+
+            async def fetch_with_sem(model: str) -> List[Dict]:
+                async with sem:
+                    return await _fetch_model(session, model)
+
+            raw_results = await asyncio.gather(
+                *[fetch_with_sem(m) for m in IPHONE_MODELS],
+                return_exceptions=True,
+            )
 
         prices: List[Dict] = []
         found_models = 0
 
         for model_name, result in zip(IPHONE_MODELS, raw_results):
-            if isinstance(result, Exception):
-                logger.debug(f"Swappie: fel för {model_name}: {result}")
-                continue
-            if not result:
+            if isinstance(result, Exception) or not result:
                 continue
             parsed = _parse_results(result)
             if parsed:
