@@ -1,176 +1,397 @@
 """
-FixMyPhone-scraper – Playwright med parallella sidor.
+FixMyPhone-scraper – klientsidig prisberäkning via data-calc JSON.
 
-FixMyPhone (salja.fixmyphone.se) beräknar priser dynamiskt i browsern.
-Optimering: kör upp till 3 modeller parallellt med asyncio.Semaphore
-istället för sekventiellt.
+FixMyPhone är en WooCommerce-butik där ALLA priser är inbäddade i ett
+JSON-attribut (data-calc) direkt i HTML-koden för varje modellsida.
+Inga API-anrop behövs efter att sidan hämtats – alla prisvarianter
+beräknas lokalt med hjälp av formeln nedan.
+
+─── Formulärstruktur (8 steg) ───────────────────────────────────────────────
+  Steg 1 – Lagring (storage): 64GB / 128GB / 256GB / 512GB / 1TB
+  Steg 2 – Fungerar enheten felfritt? Ja / Nej → isWorking
+  Steg 3 – Är skärmen helt felfri? Ja / Nej → isDisplay
+  Steg 4 – Visuellt skick: Som ny / Mycket bra / Bra / Okej → condition
+  Steg 5 – Är baksidan/kameralinsen trasig? Ja / Nej → isCracked
+  Steg 6 – Böjd, fuktskadad eller Face/Touch ID trasig? Ja / Nej → isWaterDamaged
+  Steg 7 – Batteri ≥ 85%? Ja / Nej / Jag är inte säker → isBattery (2/1/0)
+  Steg 8 – HappyPhone-box? Ja / Nej → hasBox (+200 kr, lagras EJ i DB)
+
+─── data-calc JSON (i .calcContainer) ───────────────────────────────────────
+{
+  "variations": [
+    {"storage": "256GB", "like_new": "7478", "very_good": "6660",
+     "good": "5950", "acceptable": "4530"},
+    ...
+  ],
+  "ifDisplay":      "3485",   // avdrag om skärm trasig
+  "ifWorking":      "2200",   // avdrag om ej fungerar
+  "ifBattery":      "1260",   // avdrag om batteri < 85%
+  "ifCrackedBack":  "1758",   // avdrag om baksida trasig
+  "lowest":         "770",    // garanterat minimibud (ej water_damaged)
+  "isWaterDamaged": "60",     // fast pris om böjd/vatten/Face ID – åsidosätter allt
+  "ifNotSWKeyboard": null     // laptop-specifikt, alltid null för iPhones
+}
+
+─── Prisformel (återskapad från klientsidig JS) ──────────────────────────────
+  1. Om böjd/vatten/Face ID (water_damaged): pris = isWaterDamaged (60 kr)
+  2. Annars:
+       pris = variations[storage_index][condition]
+       om ej fungerar:       pris -= ifWorking
+       om skärm trasig:      pris -= ifDisplay
+       om baksida trasig:    pris -= ifCrackedBack
+       om batteri < 85%:     pris -= ifBattery
+       pris = max(pris, int(lowest))
+  (HappyPhone-box +200 kr hanteras inte – det är en butiksbonus, inte ett skick)
+
+─── Condition-nyckel (lagras i condition-kolumnen) ───────────────────────────
+Format: {skick}  eller  {skick}:no_back:no_battery:no_display:no_working
+Suffixar i alfabetisk ordning, separerade med kolon.
+
+  Basvillkor:   like_new | very_good | good | acceptable
+  :no_back      = baksida/kameralins trasig
+  :no_battery   = batteri under 85% (isBattery == 1 eller 0)
+  :no_display   = skärm trasig
+  :no_working   = enheten fungerar ej
+
+  Specialfall:  water_damaged  → alltid 60 kr, ett pris per modell–lagring
+
+─── URL-struktur ─────────────────────────────────────────────────────────────
+  Listningssida:  https://salja.fixmyphone.se/salja/
+  Modellsida:     https://salja.fixmyphone.se/salja/iphone-{slug}/
 """
 import asyncio
+import json
 import logging
 import re
-from typing import List, Dict, Any
-from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+from itertools import product as iterproduct
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
+from bs4 import BeautifulSoup
+
 from .base import BaseScraper
 from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://salja.fixmyphone.se"
-NAV_URL = "https://fixmyphone.se"
+BASE_URL  = "https://salja.fixmyphone.se"
+LIST_URL  = BASE_URL + "/"           # Startsidan listar alla modeller
+SELL_URL  = BASE_URL + "/salja/"     # Prefix för enskilda modellsidor
 
-BEST_CONDITION_SELECTIONS = {
-    "condition": "like_new",
-    "isWorking": "1",
-    "isDisplay": "1",
-    "isCracked": "0",
-    "isWaterDamaged": "0",
-    "isBattery": "1",
-    "hasBox": "0",
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "sv-SE,sv;q=0.9",
 }
 
-MAX_CONCURRENT_PAGES = 3
+# Visuella skicknivåer i data-calc JSON (fallande ordning)
+CONDITIONS = ["like_new", "very_good", "good", "acceptable"]
 
+# Minsta pris vi sparar (water_damaged ger 60 kr – fortfarande ett giltigt bud)
+MIN_PRICE = 1
+
+
+# ─── Hjälpfunktioner ──────────────────────────────────────────────────────────
+
+def _condition_key(
+    condition: str,
+    no_working: bool,
+    no_display: bool,
+    no_back: bool,
+    no_battery: bool,
+) -> str:
+    """
+    Bygg condition-nyckel med alfabetiskt sorterade suffix.
+
+    Exempel:
+      ("good", False, True, False, True)  →  "good:no_battery:no_display"
+      ("like_new", False, False, False, False)  →  "like_new"
+    """
+    suffixes = []
+    if no_back:
+        suffixes.append("no_back")
+    if no_battery:
+        suffixes.append("no_battery")
+    if no_display:
+        suffixes.append("no_display")
+    if no_working:
+        suffixes.append("no_working")
+    # no_back, no_battery, no_display, no_working är redan i alfabetisk ordning
+    if suffixes:
+        return f"{condition}:{':'.join(suffixes)}"
+    return condition
+
+
+def _calc_price(
+    calc: Dict,
+    storage_idx: int,
+    condition: str,
+    no_working: bool,
+    no_display: bool,
+    no_back: bool,
+    no_battery: bool,
+) -> Optional[int]:
+    """
+    Tillämpa FixMyPhones prisformel och returnera beräknat pris i SEK.
+    Returnerar None om lagring/skick saknas i data-calc.
+    """
+    variations = calc.get("variations", [])
+    if storage_idx >= len(variations):
+        return None
+
+    var = variations[storage_idx]
+    base_str = var.get(condition)
+    if not base_str:
+        return None
+
+    price = int(base_str)
+
+    if no_working:
+        price -= int(calc.get("ifWorking", 0) or 0)
+    if no_display:
+        price -= int(calc.get("ifDisplay", 0) or 0)
+    if no_back:
+        price -= int(calc.get("ifCrackedBack", 0) or 0)
+    if no_battery:
+        price -= int(calc.get("ifBattery", 0) or 0)
+
+    # Garanterat minimibud från FixMyPhone
+    lowest = int(calc.get("lowest", 0) or 0)
+    price = max(price, lowest)
+
+    return price
+
+
+def _storage_label_to_gb(label: str) -> Optional[int]:
+    """'256GB' → 256, '1TB' → 1024."""
+    m = re.match(r"^(\d+)\s*(GB|TB)$", label.strip(), re.I)
+    if not m:
+        return None
+    val, unit = int(m.group(1)), m.group(2).upper()
+    return val * 1024 if unit == "TB" else val
+
+
+def _slug_to_model_name(soup: BeautifulSoup, slug: str) -> str:
+    """
+    Läs modellnamnet från sidans H1. Fallback: konvertera slug.
+    iphone-17-pro-max → iPhone 17 Pro Max
+    """
+    # Försök WooCommerce product title (H1)
+    h1 = soup.find("h1", class_=re.compile(r"product.?title|entry-title", re.I))
+    if not h1:
+        h1 = soup.find("h1")
+    if h1:
+        text = h1.get_text(strip=True)
+        # Rensa bort eventuellt pris som hamnat i H1
+        text = re.sub(r"\d[\d\s]*kr.*$", "", text, flags=re.I).strip()
+        if text and len(text) < 60:
+            return text
+
+    # Fallback: konvertera slug direkt
+    without_prefix = re.sub(r"^iphone-", "", slug, flags=re.I)
+    words = without_prefix.split("-")
+    result = []
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if w.lower() == "se":
+            result.append("SE")
+        elif re.match(r"^\d+$", w):
+            result.append(w)
+        elif w.lower() in ("pro", "plus", "max", "mini"):
+            result.append(w.capitalize())
+        elif re.match(r"^\d+(st|nd|rd|th)$", w, re.I) and i + 1 < len(words) and words[i + 1].lower() == "gen":
+            result.append(f"({w} generation)")
+            i += 1  # hoppa över "gen"
+        else:
+            result.append(w.capitalize())
+        i += 1
+
+    return "iPhone " + " ".join(result)
+
+
+def _parse_model_page(html: str, slug: str) -> Optional[Dict]:
+    """
+    Parsa data-calc JSON och extrahera modellnamn + prisdata.
+
+    Returnerar:
+      {"model_name": "iPhone 17 Pro", "calc": {...}}
+    eller None om sidan inte innehåller .calcContainer med data-calc.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    container = soup.find(class_="calcContainer")
+    if not container:
+        return None
+
+    raw_json = container.get("data-calc", "")
+    if not raw_json:
+        return None
+
+    try:
+        calc = json.loads(raw_json)
+    except json.JSONDecodeError as e:
+        logger.debug(f"FixMyPhone: JSON-fel för {slug}: {e}")
+        return None
+
+    # Hoppa över laptops (data-is-laptop='true')
+    if container.get("data-is-laptop", "false").lower() == "true":
+        return None
+
+    model_name = _slug_to_model_name(soup, slug)
+
+    return {"model_name": model_name, "calc": calc}
+
+
+def _compute_all_prices(
+    model_name: str,
+    calc: Dict,
+    slug: str,
+) -> List[Dict]:
+    """
+    Beräkna alla prisvarianter för en modell från data-calc.
+
+    Per lagring genereras:
+      64 kombinationer  (4 skick × 2^4 felflaggor)
+      + 1 water_damaged  (fast 60 kr)
+    """
+    variations  = calc.get("variations", [])
+    water_price = int(calc.get("isWaterDamaged", 60) or 60)
+    model_url   = f"{SELL_URL}{slug}"
+    records: List[Dict] = []
+
+    for idx, var in enumerate(variations):
+        storage_label = var.get("storage", "")
+        storage_gb    = _storage_label_to_gb(storage_label)
+        if storage_gb is None:
+            logger.debug(f"FixMyPhone: okänd lagring '{storage_label}' för {slug}")
+            continue
+
+        # water_damaged: fast pris, åsidosätter alla skick och fel
+        if water_price >= MIN_PRICE:
+            records.append({
+                "model":      model_name,
+                "storage_gb": storage_gb,
+                "condition":  "water_damaged",
+                "price_sek":  water_price,
+                "url":        model_url,
+            })
+
+        # Alla 64 normala kombinationer per lagring
+        for condition in CONDITIONS:
+            if not var.get(condition):
+                continue  # detta skick finns ej för lagringen
+
+            for no_working, no_display, no_back, no_battery in iterproduct(
+                (False, True),
+                (False, True),
+                (False, True),
+                (False, True),
+            ):
+                price = _calc_price(
+                    calc, idx, condition,
+                    no_working, no_display, no_back, no_battery,
+                )
+                if price is None or price < MIN_PRICE:
+                    continue
+
+                ckey = _condition_key(condition, no_working, no_display, no_back, no_battery)
+                records.append({
+                    "model":      model_name,
+                    "storage_gb": storage_gb,
+                    "condition":  ckey,
+                    "price_sek":  price,
+                    "url":        model_url,
+                })
+
+    return records
+
+
+# ─── Scraper-klass ────────────────────────────────────────────────────────────
 
 class FixMyPhoneScraper(BaseScraper):
-    retailer_id = "fixmyphone"
+    retailer_id   = "fixmyphone"
     retailer_name = "FixMyPhone"
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
-        prices = []
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            follow_redirects=True,
+            headers=HEADERS,
+        ) as client:
+            # Steg 1: Hämta iPhone-slugar från listningssidan
+            slugs = await self._get_iphone_slugs(client)
+            if not slugs:
+                logger.warning("FixMyPhone: inga iPhone-slugar hittade")
+                return []
 
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=settings.playwright_headless,
-                args=["--no-sandbox", "--disable-setuid-sandbox"],
+            logger.info(f"FixMyPhone: {len(slugs)} modeller hittade — hämtar parallellt")
+
+            # Steg 2: Hämta och parsa alla modellsidor parallellt
+            sem = asyncio.Semaphore(8)
+
+            async def fetch_model(slug: str) -> Optional[Tuple[str, Dict]]:
+                async with sem:
+                    return await self._fetch_model(client, slug)
+
+            model_results = await asyncio.gather(
+                *[fetch_model(slug) for slug in slugs],
+                return_exceptions=True,
             )
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ),
-                locale="sv-SE",
+
+            # Steg 3: Beräkna priser lokalt — inga extra HTTP-anrop
+            prices: List[Dict] = []
+            found_models = 0
+
+            for slug, result in zip(slugs, model_results):
+                if isinstance(result, Exception) or result is None:
+                    continue
+                model_name, calc_data = result
+                records = _compute_all_prices(model_name, calc_data, slug)
+                if records:
+                    found_models += 1
+                prices.extend(records)
+
+            logger.info(
+                f"FixMyPhone: {len(prices)} priser "
+                f"({found_models} modeller, "
+                f"~{len(prices) // max(found_models, 1)} kombiner/modell)"
             )
+            return prices
 
-            try:
-                model_slugs = await self._get_model_slugs(context)
-                logger.info(f"FixMyPhone: {len(model_slugs)} modeller hittade, kör parallellt ({MAX_CONCURRENT_PAGES} åt gången)")
-
-                sem = asyncio.Semaphore(MAX_CONCURRENT_PAGES)
-
-                async def scrape_with_sem(model_name: str, slug: str) -> List[Dict]:
-                    async with sem:
-                        return await self._scrape_model(context, model_name, slug)
-
-                results = await asyncio.gather(
-                    *[scrape_with_sem(name, slug) for name, slug in model_slugs],
-                    return_exceptions=True,
+    async def _get_iphone_slugs(self, client: httpx.AsyncClient) -> List[str]:
+        """Hitta alla iPhone-produktslugar från FixMyPhones startsida."""
+        try:
+            resp = await client.get(LIST_URL)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+            slugs: set = set()
+            for a in soup.find_all("a", href=True):
+                m = re.match(
+                    r"^(?:https?://salja\.fixmyphone\.se)?/salja/(iphone[^/]+)/?$",
+                    a["href"], re.I,
                 )
-
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.debug(f"FixMyPhone: modell-fel: {result}")
-                    elif result:
-                        prices.extend(result)
-
-            except Exception as e:
-                logger.exception(f"FixMyPhone: oväntat fel: {e}")
-            finally:
-                await browser.close()
-
-        logger.info(f"FixMyPhone: {len(prices)} priser hämtade")
-        return prices
-
-    async def _get_model_slugs(self, context) -> List[tuple]:
-        page = await context.new_page()
-        slugs = []
-        try:
-            await page.goto(NAV_URL, wait_until="domcontentloaded", timeout=30000)
-            links = await page.eval_on_selector_all(
-                "a[href*='salja.fixmyphone.se/salja/iphone']",
-                "els => els.map(e => [e.textContent.trim(), e.href])"
-            )
-            seen = set()
-            for text, href in links:
-                m = re.search(r"/salja/(iphone[^/]+)/?$", href)
                 if m:
-                    slug = m.group(1)
-                    model = re.sub(r"^Sälj\s+", "", text, flags=re.I).strip()
-                    if slug not in seen and model:
-                        seen.add(slug)
-                        slugs.append((model, slug))
+                    slugs.add(m.group(1).lower())
+            return sorted(slugs)
         except Exception as e:
-            logger.debug(f"FixMyPhone slug-hämtning: {e}")
-        finally:
-            await page.close()
-        return slugs
+            logger.error(f"FixMyPhone: fel vid slug-hämtning: {e}")
+            return []
 
-    async def _scrape_model(self, context, model_name: str, slug: str) -> List[Dict]:
-        url = f"{BASE_URL}/salja/{slug}/"
-        prices = []
-        page = await context.new_page()
+    async def _fetch_model(
+        self, client: httpx.AsyncClient, slug: str
+    ) -> Optional[Tuple[str, Dict]]:
+        """Hämta en modellsida och returnera (modellnamn, calc-dict)."""
         try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-
-            for select_name, value in BEST_CONDITION_SELECTIONS.items():
-                try:
-                    await page.select_option(f'select[name="{select_name}"]', value, timeout=1500)
-                except Exception:
-                    pass
-
-            storage_select = page.locator('select:not([name])')
-            count = await storage_select.count()
-
-            if count == 0:
-                price = await self._read_price(page)
-                if price:
-                    prices.append({
-                        "model": model_name,
-                        "storage_gb": None,
-                        "condition": "nyskick",
-                        "price_sek": price,
-                        "url": url,
-                    })
-            else:
-                options = await storage_select.first.locator("option").all()
-                for i, opt in enumerate(options):
-                    opt_text = await opt.inner_text()
-                    storage_gb = self._parse_storage(opt_text)
-                    await storage_select.first.select_option(index=i)
-                    await page.wait_for_timeout(300)
-                    price = await self._read_price(page)
-                    if price and price > 100:
-                        prices.append({
-                            "model": model_name,
-                            "storage_gb": storage_gb,
-                            "condition": "nyskick",
-                            "price_sek": price,
-                            "url": url,
-                        })
-
-        except PWTimeout:
-            logger.debug(f"FixMyPhone: timeout för {slug}")
+            resp = await client.get(f"{SELL_URL}{slug}")
+            if resp.status_code != 200:
+                logger.debug(f"FixMyPhone: {slug} → HTTP {resp.status_code}")
+                return None
+            data = _parse_model_page(resp.text, slug)
+            if data is None:
+                return None
+            return data["model_name"], data["calc"]
         except Exception as e:
             logger.debug(f"FixMyPhone: fel för {slug}: {e}")
-        finally:
-            await page.close()
-
-        return prices
-
-    async def _read_price(self, page) -> int | None:
-        try:
-            await page.wait_for_selector("#estimatePrice", timeout=2500)
-            price_text = await page.locator("#estimatePrice").inner_text()
-            m = re.search(r"([\d\s\xa0]+)", price_text.replace("\xa0", " "))
-            if m:
-                price_str = m.group(1).replace(" ", "").strip()
-                return int(price_str) if price_str.isdigit() else None
-        except Exception:
-            pass
-        return None
-
-    def _parse_storage(self, text: str) -> int | None:
-        m = re.search(r"(\d+)\s*(GB|TB)", text, re.I)
-        if not m:
             return None
-        val, unit = int(m.group(1)), m.group(2).upper()
-        return val * 1024 if unit == "TB" else val
