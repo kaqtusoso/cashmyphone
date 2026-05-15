@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException, Header
+from fastapi import APIRouter, Depends, Query, HTTPException, Header, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from typing import Optional, List
@@ -228,8 +228,9 @@ async def get_quote(
     )
 
 
-@router.post("/scrape", response_model=List[ScrapeStatusOut], summary="Trigga manuell scraping")
+@router.post("/scrape", summary="Trigga manuell scraping (körs i bakgrunden)")
 async def trigger_scrape(
+    background_tasks: BackgroundTasks,
     retailer: Optional[str] = Query(None, description="Scrapa bara en specifik återförsäljare"),
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: AsyncSession = Depends(get_db),
@@ -238,9 +239,21 @@ async def trigger_scrape(
         raise HTTPException(status_code=401, detail="Ogiltig API-nyckel")
 
     from ..scrapers import run_all_scrapers, run_scraper
-    if retailer:
-        results = [await run_scraper(retailer, db)]
-    else:
-        results = await run_all_scrapers(db)
+    from ..database import AsyncSessionLocal
+    import logging
+    _log = logging.getLogger(__name__)
 
-    return results
+    async def _run_in_background():
+        async with AsyncSessionLocal() as session:
+            try:
+                if retailer:
+                    results = [await run_scraper(retailer, session)]
+                else:
+                    results = await run_all_scrapers(session)
+                for r in results:
+                    _log.info(f"[bg-scrape] {r.retailer}: {r.status} – {r.message}")
+            except Exception as e:
+                _log.error(f"[bg-scrape] fel: {e}")
+
+    background_tasks.add_task(_run_in_background)
+    return {"status": "started", "message": "Scraping körs i bakgrunden. Kolla deploy-loggarna för resultat."}

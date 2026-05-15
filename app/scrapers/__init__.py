@@ -35,13 +35,19 @@ async def run_scraper(retailer_id: str, db: AsyncSession) -> ScrapeStatusOut:
     return await scraper_class().run(db)
 
 
+SCRAPER_TIMEOUT = 120  # sekunder per scraper
+
+
 async def run_all_scrapers(db: AsyncSession) -> List[ScrapeStatusOut]:
     """Kör alla scrapers parallellt – varje scraper får en egen DB-session."""
 
     async def run_isolated(retailer_id: str, scraper_class) -> ScrapeStatusOut:
         async with AsyncSessionLocal() as session:
             logger.info(f"→ Startar {scraper_class.retailer_name if hasattr(scraper_class, 'retailer_name') else retailer_id}...")
-            return await scraper_class().run(session)
+            return await asyncio.wait_for(
+                scraper_class().run(session),
+                timeout=SCRAPER_TIMEOUT,
+            )
 
     tasks = [
         run_isolated(rid, cls)
