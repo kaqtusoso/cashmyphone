@@ -105,7 +105,7 @@ curl -X POST "https://din-api.railway.app/api/quote" \
   "retailer": "phonehero",
   "model": "iPhone 17",
   "storage_gb": 256,
-  "condition": "device=nyskick|defect=nej|critical=nej",
+  "condition": "dev=n|d=no|c=no",
   "price_sek": 7095,
   "currency": "SEK",
   "url": "https://phonehero.se/salj-din-gamla-mobil-till-oss?model=iphone-17",
@@ -115,8 +115,8 @@ curl -X POST "https://din-api.railway.app/api/quote" \
 
 PhoneHero har två condition-format beroende på modellfamilj:
 
-- Nyare modeller: `device=nyskick|defect=nej|critical=nej`
-- Äldre/modeller med fler frågor: `screen=nyskick|body=nyskick|defect=nej|critical=nej|battery=ok`
+- Nyare modeller: `dev=n|d=no|c=no`
+- Äldre/modeller med fler frågor: `s=n|b=n|d=no|c=no|bt=ok`
 
 ## Databasschema
 

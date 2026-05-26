@@ -153,10 +153,10 @@ def telestore_condition(a: FormAnswers) -> Optional[str]:
 # ─── PhoneHero ────────────────────────────────────────────────────────────────
 
 _PHONEHERO_VISUAL: Dict[str, str] = {
-    "LIKE_NEW":   "nyskick",
-    "ALMOST_NEW": "normalt_sliten",
-    "GOOD":       "normalt_sliten",
-    "MODERATE":   "mycket_sliten",
+    "LIKE_NEW":   "n",
+    "ALMOST_NEW": "ns",
+    "GOOD":       "ns",
+    "MODERATE":   "ms",
 }
 
 def phonehero_conditions(a: FormAnswers) -> List[str]:
@@ -164,40 +164,41 @@ def phonehero_conditions(a: FormAnswers) -> List[str]:
     Returnerar möjliga PhoneHero-nycklar.
 
     PhoneHero använder två olika formulärfamiljer:
-      äldre modeller: screen=...|body=...|defect=...|critical=...|battery=...
-      nyare modeller: device=...|defect=...|critical=...
+      äldre modeller: s=...|b=...|d=...|c=...|bt=...
+      nyare modeller: dev=...|d=...|c=...
 
     Eftersom formulärfamiljen beror på modell returnerar vi båda. DB-frågan
     matchar sedan bara den nyckel som faktiskt finns för vald modell.
     """
     screen = _PHONEHERO_VISUAL[a.screen_surface]
     if a.is_screen_broken:
-        screen = "trasig_lcd"
+        screen = "lcd"
     elif a.is_glass_broken:
-        screen = "sprickor_glas"
+        screen = "sg"
 
     body_surface = _worst(a.sides_surface, a.back_surface)
-    body = "sprickor" if a.back_surface == "MODERATE" else _PHONEHERO_VISUAL[body_surface]
+    body = "sp" if a.back_surface == "MODERATE" else _PHONEHERO_VISUAL[body_surface]
 
     if a.is_glass_broken and a.back_surface == "MODERATE":
-        device = "sprucket_fram_bak"
+        device = "sfb"
     elif a.is_glass_broken or a.is_screen_broken:
-        device = "sprucket_fram"
+        device = "sf"
     elif a.back_surface == "MODERATE":
-        device = "sprucket_bak"
+        device = "sb"
     else:
         device = _PHONEHERO_VISUAL[_worst(a.screen_surface, a.sides_surface, a.back_surface)]
 
-    defect = "startar_inte" if a.is_broken else "nej"
-    critical = "nej"
+    defect = "off" if a.is_broken else "no"
+    critical = "no"
     if a.is_water_damaged:
-        critical = "ja_fel" if a.is_broken else "ja_fungerar"
+        critical = "ybad" if a.is_broken else "yok"
 
     battery = "low" if a.is_battery_low else "ok"
 
     return [
-        f"screen={screen}|body={body}|defect={defect}|critical={critical}|battery={battery}",
-        f"device={device}|defect={defect}|critical={critical}",
+        f"s={screen}|b={body}|d={defect}|c={critical}|bt={battery}",
+        f"dev={device}|d={defect}|c={critical}|bt={battery}",
+        f"dev={device}|d={defect}|c={critical}",
     ]
 
 

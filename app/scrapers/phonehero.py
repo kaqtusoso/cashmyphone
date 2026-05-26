@@ -12,8 +12,8 @@ Vi behöver alltså inte klicka igenom varje kombination server-side. För varje
 modell genereras alla kombinationer av lagring × ett svar per fråga.
 
 Condition-nyckel:
-  screen=nyskick|body=mycket_sliten|defect=nej|critical=nej|battery=ok
-  device=nyskick|defect=nej|critical=nej
+  s=n|b=ms|d=no|c=no|bt=ok
+  dev=n|d=no|c=no
 
 Vissa nyare modeller har en enda "device"-skickfråga i stället för separata
 screen/body-frågor. Äldre modeller har ofta screen + body + battery.
@@ -72,41 +72,41 @@ def _answer_key(label: str) -> str:
     """Kompakt, stabil nyckel för svenska PhoneHero-svar."""
     text = (label or "").lower()
     if "nyskick" in text:
-        return "nyskick"
+        return "n"
     if "normalt sliten" in text:
-        return "normalt_sliten"
+        return "ns"
     if "mycket sliten" in text:
-        return "mycket_sliten"
+        return "ms"
     if "sprickor i glaset" in text:
-        return "sprickor_glas"
+        return "sg"
     if "trasig lcd" in text:
-        return "trasig_lcd"
+        return "lcd"
     if "sprucket glas" in text and "fram och baksida" in text:
-        return "sprucket_fram_bak"
+        return "sfb"
     if "sprucket glas" in text and "framsida" in text:
-        return "sprucket_fram"
+        return "sf"
     if "sprucket glas" in text and "baksida" in text:
-        return "sprucket_bak"
+        return "sb"
     if text.strip() == "sprickor":
-        return "sprickor"
+        return "sp"
     if text.strip() == "nej":
-        return "nej"
+        return "no"
     if "face-id" in text or "face id" in text:
-        return "face_id"
+        return "fid"
     if "fingeravtryck" in text:
-        return "fingeravtryck"
+        return "fp"
     if "ljudet" in text:
-        return "ljud"
+        return "snd"
     if "startar inte" in text:
-        return "startar_inte"
+        return "off"
     if "kamera" in text:
-        return "kamera"
+        return "cam"
     if "annat fel" in text:
-        return "annat_fel"
+        return "oth"
     if "ja, men" in text and "fungerar" in text:
-        return "ja_fungerar"
+        return "yok"
     if "ja, och" in text:
-        return "ja_fel"
+        return "ybad"
     if "minst 85" in text:
         return "ok"
     if "lägre än 85" in text or "lagre an 85" in _slugify_label(text):
@@ -120,17 +120,17 @@ def _question_key(question: Dict[str, Any], condition_index: int) -> str:
 
     if qtype == "condition":
         if "skärmen" in label:
-            return "screen"
+            return "s"
         if "sidorna" in label or "baksidan" in label:
-            return "body"
-        return "device" if condition_index == 0 else f"condition{condition_index + 1}"
+            return "b"
+        return "dev" if condition_index == 0 else f"cond{condition_index + 1}"
     if qtype == "defects":
-        return "defect"
+        return "d"
     if qtype == "criticaldamage":
-        return "critical"
+        return "c"
     if qtype == "batteryhealth":
-        return "battery"
-    return _slugify_label(qtype or label)
+        return "bt"
+    return f"q{question.get('sortid', 'x')}"
 
 
 def _condition_key(selections: List[Dict[str, Any]]) -> str:
