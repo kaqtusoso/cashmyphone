@@ -76,6 +76,10 @@ curl -X POST https://din-api.railway.app/api/scrape \
 curl -X POST "https://din-api.railway.app/api/scrape?retailer=phonehero" \
   -H "X-API-Key: din-hemliga-nyckel"
 
+# Scrapa PhoneHero synkront och få resultat/fel direkt i terminalen
+curl -X POST "https://din-api.railway.app/api/scrape?retailer=phonehero&sync=true" \
+  -H "X-API-Key: din-hemliga-nyckel"
+
 # Hämta live-quote från alla aktiva återförsäljare
 curl -X POST "https://din-api.railway.app/api/quote" \
   -H "Content-Type: application/json" \

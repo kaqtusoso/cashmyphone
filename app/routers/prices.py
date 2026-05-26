@@ -284,6 +284,7 @@ async def import_prices(
 async def trigger_scrape(
     background_tasks: BackgroundTasks,
     retailer: Optional[str] = Query(None, description="Scrapa bara en specifik återförsäljare"),
+    sync: bool = Query(False, description="Kör scrapingen direkt och returnera resultatet"),
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -294,6 +295,16 @@ async def trigger_scrape(
     from ..database import AsyncSessionLocal
     import logging
     _log = logging.getLogger(__name__)
+
+    if sync:
+        if retailer:
+            results = [await run_scraper(retailer, db)]
+        else:
+            results = await run_all_scrapers(db)
+        return {
+            "status": "completed",
+            "results": [r.model_dump() for r in results],
+        }
 
     async def _run_in_background():
         async with AsyncSessionLocal() as session:
