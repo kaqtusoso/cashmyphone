@@ -151,7 +151,14 @@ def _calc_price(base_price: int, selections: List[Dict[str, Any]]) -> int:
             kronor += round(modify)
 
     price = round(base_price - (base_price * percent / 100) - kronor)
-    return max(0, price)
+    return _round_display_price(price)
+
+
+def _round_display_price(price: int) -> int:
+    """PhoneHero visar bud avrundade till närmaste hundralapp."""
+    if price <= 0:
+        return 0
+    return ((price + 50) // 100) * 100
 
 
 class PhoneHeroScraper(BaseScraper):
@@ -289,7 +296,7 @@ class PhoneHeroScraper(BaseScraper):
                         "model": model_name,
                         "storage_gb": self._parse_storage(storage_str),
                         "condition": "nyskick",
-                        "price_sek": int(base_price),
+                        "price_sek": _round_display_price(int(base_price)),
                         "url": f"{SELL_URL}?model={slug}",
                     })
                     continue
