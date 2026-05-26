@@ -297,14 +297,23 @@ async def trigger_scrape(
     _log = logging.getLogger(__name__)
 
     if sync:
-        if retailer:
-            results = [await run_scraper(retailer, db)]
-        else:
-            results = await run_all_scrapers(db)
-        return {
-            "status": "completed",
-            "results": [r.model_dump() for r in results],
-        }
+        try:
+            if retailer:
+                results = [await run_scraper(retailer, db)]
+            else:
+                results = await run_all_scrapers(db)
+            return {
+                "status": "completed",
+                "results": [r.model_dump() for r in results],
+            }
+        except Exception as e:
+            _log.exception("[sync-scrape] fel")
+            await db.rollback()
+            return {
+                "status": "error",
+                "message": str(e),
+                "error_type": type(e).__name__,
+            }
 
     async def _run_in_background():
         async with AsyncSessionLocal() as session:

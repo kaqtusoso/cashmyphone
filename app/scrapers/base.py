@@ -79,6 +79,7 @@ class BaseScraper(ABC):
 
         except Exception as e:
             logger.exception(f"❌ {self.retailer_name} scraping misslyckades: {e}")
+            await db.rollback()
             run.status = "error"
             run.error_message = str(e)
             run.finished_at = datetime.utcnow()
