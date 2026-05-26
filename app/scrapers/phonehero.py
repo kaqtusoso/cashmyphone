@@ -155,10 +155,10 @@ def _calc_price(base_price: int, selections: List[Dict[str, Any]]) -> int:
 
 
 def _round_display_price(price: int) -> int:
-    """PhoneHero visar bud avrundade till närmaste hundralapp."""
+    """PhoneHero visar bud takavrundade till närmaste tiotal."""
     if price <= 0:
         return 0
-    return ((price + 50) // 100) * 100
+    return ((price + 9) // 10) * 10
 
 
 class PhoneHeroScraper(BaseScraper):
