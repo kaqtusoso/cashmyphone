@@ -23,7 +23,7 @@ egna skick-system.
                None = Telestore lägger inget bud (enheten fungerar ej)
 """
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 
 # ─── Ytskala ──────────────────────────────────────────────────────────────────
@@ -150,9 +150,63 @@ def telestore_condition(a: FormAnswers) -> Optional[str]:
     return f"{skick}:{':'.join(suffixes)}" if suffixes else skick
 
 
+# ─── PhoneHero ────────────────────────────────────────────────────────────────
+
+_PHONEHERO_VISUAL: Dict[str, str] = {
+    "LIKE_NEW":   "nyskick",
+    "ALMOST_NEW": "normalt_sliten",
+    "GOOD":       "normalt_sliten",
+    "MODERATE":   "mycket_sliten",
+}
+
+def phonehero_conditions(a: FormAnswers) -> List[str]:
+    """
+    Returnerar möjliga PhoneHero-nycklar.
+
+    PhoneHero använder två olika formulärfamiljer:
+      äldre modeller: screen=...|body=...|defect=...|critical=...|battery=...
+      nyare modeller: device=...|defect=...|critical=...
+
+    Eftersom formulärfamiljen beror på modell returnerar vi båda. DB-frågan
+    matchar sedan bara den nyckel som faktiskt finns för vald modell.
+    """
+    screen = _PHONEHERO_VISUAL[a.screen_surface]
+    if a.is_screen_broken:
+        screen = "trasig_lcd"
+    elif a.is_glass_broken:
+        screen = "sprickor_glas"
+
+    body_surface = _worst(a.sides_surface, a.back_surface)
+    body = "sprickor" if a.back_surface == "MODERATE" else _PHONEHERO_VISUAL[body_surface]
+
+    if a.is_glass_broken and a.back_surface == "MODERATE":
+        device = "sprucket_fram_bak"
+    elif a.is_glass_broken or a.is_screen_broken:
+        device = "sprucket_fram"
+    elif a.back_surface == "MODERATE":
+        device = "sprucket_bak"
+    else:
+        device = _PHONEHERO_VISUAL[_worst(a.screen_surface, a.sides_surface, a.back_surface)]
+
+    defect = "startar_inte" if a.is_broken else "nej"
+    critical = "nej"
+    if a.is_water_damaged:
+        critical = "ja_fel" if a.is_broken else "ja_fungerar"
+
+    battery = "low" if a.is_battery_low else "ok"
+
+    return [
+        f"screen={screen}|body={body}|defect={defect}|critical={critical}|battery={battery}",
+        f"device={device}|defect={defect}|critical={critical}",
+    ]
+
+
 # ─── Samlad lookup ────────────────────────────────────────────────────────────
 
-def all_conditions(a: FormAnswers) -> Dict[str, Optional[str]]:
+ConditionLookup = Optional[Union[str, List[str]]]
+
+
+def all_conditions(a: FormAnswers) -> Dict[str, ConditionLookup]:
     """
     Returnerar condition-nycklarna för alla fyra återförsäljare givet
     ett CashMyPhone-formulärsvar.
@@ -163,4 +217,5 @@ def all_conditions(a: FormAnswers) -> Dict[str, Optional[str]]:
         "fixmyphone": fixmyphone_condition(a),
         "happyphone": happyphone_condition(a),
         "telestore":  telestore_condition(a),
+        "phonehero":  phonehero_conditions(a),
     }

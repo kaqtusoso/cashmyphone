@@ -6,7 +6,7 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 
 | Återförsäljare | Metod | Status |
 |---|---|---|
-| PhoneHero | Livewire snapshot (`?model=slug`) | ✅ Aktiv – 80+ priser |
+| PhoneHero | Livewire snapshot (`?model=slug`) + lokal kombinationsberäkning | ✅ Aktiv – 45 000+ skickskombinationer |
 | HappyPhone | HTML-scraping (`/shop/sell/`) | ✅ Aktiv – 27+ priser |
 | Telestore | HTML-scraping (`/salja-mobil/`) | ✅ Aktiv – 29+ priser |
 | FixMyPhone | Playwright (`salja.fixmyphone.se`) | ✅ Aktiv – kräver browser |
@@ -21,7 +21,9 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 | `GET /api/prices/best` | Bästa bud per modell/lagring/skick |
 | `GET /api/models` | Lista alla tillgängliga modeller |
 | `GET /api/retailers` | Lista aktiva återförsäljare |
+| `POST /api/quote` | Returnerar bästa bud för ett formulärsvar |
 | `POST /api/scrape` | Trigga manuell scraping (kräver `X-API-Key` header) |
+| `POST /api/import-prices/{retailer}` | Importera lokalt hämtade priser (kräver `X-API-Key` header) |
 | `GET /health` | Healthcheck |
 | `GET /docs` | Swagger UI |
 
@@ -73,6 +75,22 @@ curl -X POST https://din-api.railway.app/api/scrape \
 # Scrapa bara PhoneHero
 curl -X POST "https://din-api.railway.app/api/scrape?retailer=phonehero" \
   -H "X-API-Key: din-hemliga-nyckel"
+
+# Hämta live-quote från alla aktiva återförsäljare
+curl -X POST "https://din-api.railway.app/api/quote" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "iPhone 17",
+    "storage_gb": 256,
+    "screen_surface": "LIKE_NEW",
+    "sides_surface": "LIKE_NEW",
+    "back_surface": "LIKE_NEW",
+    "is_broken": false,
+    "is_screen_broken": false,
+    "is_glass_broken": false,
+    "is_battery_low": false,
+    "is_water_damaged": false
+  }'
 ```
 
 ## Prisformat
@@ -81,15 +99,20 @@ curl -X POST "https://din-api.railway.app/api/scrape?retailer=phonehero" \
 {
   "id": 1,
   "retailer": "phonehero",
-  "model": "iPhone 15 Pro",
+  "model": "iPhone 17",
   "storage_gb": 256,
-  "condition": "nyskick",
-  "price_sek": 6159,
+  "condition": "device=nyskick|defect=nej|critical=nej",
+  "price_sek": 7095,
   "currency": "SEK",
-  "url": "https://phonehero.se/salj-din-gamla-mobil-till-oss?model=iphone-15-pro",
-  "scraped_at": "2026-05-12T10:00:00"
+  "url": "https://phonehero.se/salj-din-gamla-mobil-till-oss?model=iphone-17",
+  "scraped_at": "2026-05-26T10:00:00"
 }
 ```
+
+PhoneHero har två condition-format beroende på modellfamilj:
+
+- Nyare modeller: `device=nyskick|defect=nej|critical=nej`
+- Äldre/modeller med fler frågor: `screen=nyskick|body=nyskick|defect=nej|critical=nej|battery=ok`
 
 ## Databasschema
 
@@ -101,4 +124,4 @@ curl -X POST "https://din-api.railway.app/api/scrape?retailer=phonehero" \
 - Scraping körs var 6:e timme (konfigurerbart via `SCRAPE_INTERVAL_HOURS`)
 - Swappie och FixMyPhone kräver Playwright (ingår i Dockerfile)
 - Priser märks som `is_active=false` innan varje ny scraping-körning
-- `condition: "nyskick"` = bästa möjliga skick (ingen rabatt)
+- PhoneHero-priser beräknas från publika Livewire-snapshots: baspris per lagring minus avdrag per formulärsvar.

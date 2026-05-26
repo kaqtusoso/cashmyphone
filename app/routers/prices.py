@@ -174,10 +174,11 @@ async def get_quote(
         if ckey is None:
             continue  # t.ex. Telestore om enheten inte fungerar
         active_retailers.append(retailer)
+        condition_keys = ckey if isinstance(ckey, list) else [ckey]
         retailer_filters.append(
             and_(
                 func.lower(BuybackPrice.retailer)  == retailer,
-                func.lower(BuybackPrice.condition) == ckey.lower(),
+                func.lower(BuybackPrice.condition).in_([c.lower() for c in condition_keys]),
                 func.lower(BuybackPrice.model) == model_normalized.lower(),
                 BuybackPrice.storage_gb == req.storage_gb,
                 BuybackPrice.is_active == True,
@@ -210,7 +211,7 @@ async def get_quote(
         seen.add(row.retailer)
         quotes.append(RetailerQuote(
             retailer=row.retailer,
-            condition_key=conditions[row.retailer],
+            condition_key=row.condition,
             price_sek=row.price_sek,
             url=row.url,
         ))

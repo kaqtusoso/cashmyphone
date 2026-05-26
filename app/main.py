@@ -54,5 +54,13 @@ async def root():
     return {
         "name": "CashMyPhone API",
         "docs": "/docs",
-        "endpoints": ["/api/prices", "/api/prices/best", "/api/models", "/api/retailers"],
+        "endpoints": [
+            "/api/prices",
+            "/api/prices/best",
+            "/api/models",
+            "/api/retailers",
+            "/api/quote",
+            "/api/scrape",
+            "/api/import-prices/{retailer}",
+        ],
     }
