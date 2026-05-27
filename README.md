@@ -7,6 +7,7 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 | Återförsäljare | Metod | Status |
 |---|---|---|
 | PhoneHero | Livewire snapshot (`?model=slug`) + lokal kombinationsberäkning | ✅ Aktiv – 45 000+ skickskombinationer |
+| reNewed | Reusely widget-API (`/v2/widget/catalog/...`) | ✅ Aktiv – iPhone-modeller/lagring/skick |
 | HappyPhone | HTML-scraping (`/shop/sell/`) | ✅ Aktiv – 27+ priser |
 | Telestore | HTML-scraping (`/salja-mobil/`) | ✅ Aktiv – 29+ priser |
 | FixMyPhone | Playwright (`salja.fixmyphone.se`) | ✅ Aktiv – kräver browser |
@@ -80,6 +81,10 @@ curl -X POST "https://din-api.railway.app/api/scrape?retailer=phonehero" \
 curl -X POST "https://din-api.railway.app/api/scrape?retailer=phonehero&sync=true" \
   -H "X-API-Key: din-hemliga-nyckel"
 
+# Scrapa reNewed synkront
+curl -X POST "https://din-api.railway.app/api/scrape?retailer=renewed&sync=true" \
+  -H "X-API-Key: din-hemliga-nyckel"
+
 # Hämta live-quote från alla aktiva återförsäljare
 curl -X POST "https://din-api.railway.app/api/quote" \
   -H "Content-Type: application/json" \
@@ -118,6 +123,13 @@ PhoneHero har två condition-format beroende på modellfamilj:
 - Nyare modeller: `dev=n|d=no|c=no`
 - Äldre/modeller med fler frågor: `s=n|b=n|d=no|c=no|bt=ok`
 
+reNewed använder Reuselys fyra publika skicknivåer:
+
+- `very_good` – Mycket bra skick
+- `used` – Använt skick
+- `worn` – Slitet skick
+- `broken` – Trasigt skick
+
 ## Databasschema
 
 - `buyback_prices` – aktuella inköpspriser per återförsäljare/modell/lagring/skick
@@ -129,3 +141,4 @@ PhoneHero har två condition-format beroende på modellfamilj:
 - Swappie och FixMyPhone kräver Playwright (ingår i Dockerfile)
 - Priser märks som `is_active=false` innan varje ny scraping-körning
 - PhoneHero-priser beräknas från publika Livewire-snapshots: baspris per lagring minus avdrag per formulärsvar.
+- reNewed-priser hämtas från samma Reusely-widget-API som deras säljsida använder.

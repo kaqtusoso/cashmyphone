@@ -6,6 +6,7 @@ from ..models import ScrapeStatusOut
 from ..database import AsyncSessionLocal
 from .swappie import SwappieScraper
 from .phonehero import PhoneHeroScraper
+from .renewed import RenewedScraper
 from .happyphone import HappyPhoneScraper
 from .fixmyphone import FixMyPhoneScraper
 from .telestore import TelestoreScraper
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 SCRAPERS = {
     "swappie": SwappieScraper,
     "phonehero": PhoneHeroScraper,
+    "renewed": RenewedScraper,
     "happyphone": HappyPhoneScraper,
     "fixmyphone": FixMyPhoneScraper,
     "telestore": TelestoreScraper,

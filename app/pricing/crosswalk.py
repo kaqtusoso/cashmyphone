@@ -21,6 +21,7 @@ egna skick-system.
   HappyPhone:  identisk med FixMyPhone
   Telestore:   "nyskick"   /  "bra:bat:sidor"  /  "water_damaged"
                None = Telestore lägger inget bud (enheten fungerar ej)
+  reNewed:     "very_good" / "used" / "worn" / "broken"
 """
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
@@ -202,6 +203,39 @@ def phonehero_conditions(a: FormAnswers) -> List[str]:
     ]
 
 
+# ─── reNewed ──────────────────────────────────────────────────────────────────
+
+_RENEWED_VISUAL: Dict[str, str] = {
+    "LIKE_NEW":   "very_good",
+    "ALMOST_NEW": "very_good",
+    "GOOD":       "used",
+    "MODERATE":   "worn",
+}
+
+def renewed_condition(a: FormAnswers) -> Optional[str]:
+    """
+    Returnerar reNeweds Reusely-condition.
+
+    reNewed har fyra publika skicknivåer. "Trasigt skick" kräver enligt deras
+    villkor att telefonen kan startas och inte är fukt-/böjskadad, så sådana
+    kombinationer filtreras bort.
+    """
+    if a.is_broken or a.is_water_damaged:
+        return None
+
+    if a.is_glass_broken or a.is_screen_broken or a.back_surface == "MODERATE":
+        return "broken"
+
+    visual = _RENEWED_VISUAL[_worst(a.screen_surface, a.sides_surface, a.back_surface)]
+
+    # Deras bästa skick kräver minst 85 % batterihälsa; övriga visuella skick
+    # kräver minst 80 %. CashMyPhones batteriflagga betyder under topptröskeln.
+    if a.is_battery_low and visual == "very_good":
+        return "used"
+
+    return visual
+
+
 # ─── Samlad lookup ────────────────────────────────────────────────────────────
 
 ConditionLookup = Optional[Union[str, List[str]]]
@@ -219,4 +253,5 @@ def all_conditions(a: FormAnswers) -> Dict[str, ConditionLookup]:
         "happyphone": happyphone_condition(a),
         "telestore":  telestore_condition(a),
         "phonehero":  phonehero_conditions(a),
+        "renewed":    renewed_condition(a),
     }
