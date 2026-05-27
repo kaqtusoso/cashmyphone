@@ -11,6 +11,7 @@ from .happyphone import HappyPhoneScraper
 from .fixmyphone import FixMyPhoneScraper
 from .telestore import TelestoreScraper
 from .teknikcentralen import TeknikcentralenScraper
+from .fixiphone import FixiphoneScraper
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ SCRAPERS = {
     "fixmyphone": FixMyPhoneScraper,
     "telestore": TelestoreScraper,
     "teknikcentralen": TeknikcentralenScraper,
+    "fixiphone": FixiphoneScraper,
 }
 
 

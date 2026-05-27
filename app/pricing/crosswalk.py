@@ -22,6 +22,7 @@ egna skick-system.
   Telestore:   "nyskick"   /  "bra:bat:sidor"  /  "water_damaged"
                None = Telestore lägger inget bud (enheten fungerar ej)
   reNewed:     "very_good" / "used" / "worn" / "broken"
+  Fixiphone:   "d0" / "d10" / ... summerat procentavdrag enligt deras formulär
 """
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
@@ -236,6 +237,39 @@ def renewed_condition(a: FormAnswers) -> Optional[str]:
     return visual
 
 
+# ─── Fixiphone ────────────────────────────────────────────────────────────────
+
+def fixiphone_se_condition(a: FormAnswers) -> str:
+    """
+    Returnerar Fixiphones summerade avdragsnyckel.
+
+    Fixiphone fragar:
+      - fungerar telefonen normalt? nej = 45
+      - ar skarmens farg jamn? nej = 45
+      - finns repor/bucklor i ram eller skarm? omarkbar = 10, markbar = 20
+      - ar nagon glasdel trasig? ja = 45
+      - ar den bojd/vattenskadad/Face ID trasig? ja = 90
+    """
+    deduction = 0
+    if a.is_broken:
+        deduction += 45
+    if a.is_screen_broken:
+        deduction += 45
+
+    visual_wear = _worst(a.screen_surface, a.sides_surface)
+    if visual_wear == "ALMOST_NEW":
+        deduction += 10
+    elif visual_wear in {"GOOD", "MODERATE"}:
+        deduction += 20
+
+    if a.is_glass_broken or a.back_surface == "MODERATE":
+        deduction += 45
+    if a.is_water_damaged:
+        deduction += 90
+
+    return f"d{deduction}"
+
+
 # ─── Samlad lookup ────────────────────────────────────────────────────────────
 
 ConditionLookup = Optional[Union[str, List[str]]]
@@ -254,4 +288,5 @@ def all_conditions(a: FormAnswers) -> Dict[str, ConditionLookup]:
         "telestore":  telestore_condition(a),
         "phonehero":  phonehero_conditions(a),
         "renewed":    renewed_condition(a),
+        "fixiphone":  fixiphone_se_condition(a),
     }
