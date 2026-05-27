@@ -7,6 +7,7 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 | Återförsäljare | Metod | Status |
 |---|---|---|
 | PhoneHero | Livewire snapshot (`?model=slug`) + lokal kombinationsberäkning | ✅ Aktiv – 45 000+ skickskombinationer |
+| FixPhonePro | Inline-JS från `/salj/` + lokal formelberäkning | ✅ Aktiv – iPhone-modeller/lagring/skick |
 | reNewed | Reusely widget-API (`/v2/widget/catalog/...`) | ✅ Aktiv – iPhone-modeller/lagring/skick |
 | HappyPhone | HTML-scraping (`/shop/sell/`) | ✅ Aktiv – 27+ priser |
 | Telestore | HTML-scraping (`/salja-mobil/`) | ✅ Aktiv – 29+ priser |
@@ -89,6 +90,10 @@ curl -X POST "https://din-api.railway.app/api/scrape?retailer=renewed&sync=true"
 curl -X POST "https://din-api.railway.app/api/scrape?retailer=fixiphone&sync=true" \
   -H "X-API-Key: din-hemliga-nyckel"
 
+# Scrapa FixPhonePro synkront
+curl -X POST "https://din-api.railway.app/api/scrape?retailer=fixphonepro&sync=true" \
+  -H "X-API-Key: din-hemliga-nyckel"
+
 # Hämta live-quote från alla aktiva återförsäljare
 curl -X POST "https://din-api.railway.app/api/quote" \
   -H "Content-Type: application/json" \
@@ -133,6 +138,11 @@ reNewed använder Reuselys fyra publika skicknivåer:
 - `used` – Använt skick
 - `worn` – Slitet skick
 - `broken` – Trasigt skick
+
+FixPhonePro använder kompakta formelnycklar från deras publika JS:
+
+- `s=n|b=n|d=no|f=y|bt=ok` – nyskick, inget fel, batteri minst 85 %
+- `s=sp|b=ms|d=yes|f=n|bt=low` – spräckt skärm, sliten baksida/ram, fel/fungerar ej, batteri under 85 %
 
 ## Databasschema
 

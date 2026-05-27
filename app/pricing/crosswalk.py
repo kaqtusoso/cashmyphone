@@ -23,6 +23,7 @@ egna skick-system.
                None = Telestore lägger inget bud (enheten fungerar ej)
   reNewed:     "very_good" / "used" / "worn" / "broken"
   Fixiphone:   "d0" / "d10" / ... summerat procentavdrag enligt deras formulär
+  FixPhonePro: "s=n|b=n|d=no|f=y|bt=ok"
 """
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
@@ -270,6 +271,35 @@ def fixiphone_se_condition(a: FormAnswers) -> str:
     return f"d{deduction}"
 
 
+# ─── FixPhonePro ──────────────────────────────────────────────────────────────
+
+_FIXPHONEPRO_VISUAL: Dict[str, str] = {
+    "LIKE_NEW":   "n",
+    "ALMOST_NEW": "ns",
+    "GOOD":       "ms",
+    "MODERATE":   "sp",
+}
+
+def fixphonepro_condition(a: FormAnswers) -> str:
+    """
+    Returnerar FixPhonePros formel-nyckel.
+
+    FixPhonePro fragar separat efter skarm, baksida/ram, fel, om allt fungerar
+    och batterihalsa. Alla feltyper har samma prisfaktor i deras publika JS.
+    """
+    screen = "sp" if (a.is_glass_broken or a.is_screen_broken) else _FIXPHONEPRO_VISUAL[a.screen_surface]
+
+    body_surface = _worst(a.sides_surface, a.back_surface)
+    body = "sp" if a.back_surface == "MODERATE" else _FIXPHONEPRO_VISUAL[body_surface]
+
+    has_defect = a.is_broken or a.is_screen_broken or a.is_water_damaged
+    functional = "n" if has_defect else "y"
+    defect = "yes" if has_defect else "no"
+    battery = "low" if a.is_battery_low else "ok"
+
+    return f"s={screen}|b={body}|d={defect}|f={functional}|bt={battery}"
+
+
 # ─── Samlad lookup ────────────────────────────────────────────────────────────
 
 ConditionLookup = Optional[Union[str, List[str]]]
@@ -289,4 +319,5 @@ def all_conditions(a: FormAnswers) -> Dict[str, ConditionLookup]:
         "phonehero":  phonehero_conditions(a),
         "renewed":    renewed_condition(a),
         "fixiphone":  fixiphone_se_condition(a),
+        "fixphonepro": fixphonepro_condition(a),
     }

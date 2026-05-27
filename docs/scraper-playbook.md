@@ -62,3 +62,36 @@ Avdrag:
 - Bojd/vattenskadad/Face ID eller Touch ID trasig: `90`
 
 Vi lagrar nedre priset for skadade kombinationer, eftersom Fixiphone visar intervall och CashMyPhone visar ett enda bud. For perfekt skick blir priset exakt baspriset.
+
+## FixPhonePro-fynd 2026-05-27
+
+FixPhonePro ar WordPress/WooCommerce. Sjalva saljsidan ar inte Livewire som PhoneHero, utan en Elementor-sida dar hela prislistan och formeln ligger i inline-JS:
+
+```text
+https://fixphonepro.net/salj/
+```
+
+Leta efter `const MODELLER = [` och `function calculatePrice()`.
+
+Datat innehaller `brand`, `name`, `storage` och `basePrice`. Endast `brand: "Apple"` anvands for CashMyPhone.
+
+Deras formel:
+
+```text
+pris = basePrice
+lagring: 16GB 0.8, 32GB 0.85, 64GB 0.9, 128GB 1.0, 256GB 1.1, 512GB 1.2, 1TB 1.3
+skarm: Nyskick 1.0, Normalt sliten 0.9, Mycket sliten 0.7, Sprackt 0.4
+baksida/ram: Nyskick 1.0, Normalt sliten 0.95, Mycket sliten 0.8, Sprackt 0.6
+fel: Inget fel 1.0, valfritt fel 0.7
+fungerar allt: Ja 1.0, Nej 0.5
+batteri: minst 85% 1.0, lagre an 85% 0.9
+visat pris = Math.round(max(100, pris))
+```
+
+Condition-nyckeln halls kort:
+
+```text
+s=n|b=n|d=no|f=y|bt=ok
+```
+
+Där `s` = screen, `b` = body, `d` = defect, `f` = functional och `bt` = battery.
