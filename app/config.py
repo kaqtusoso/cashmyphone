@@ -14,7 +14,7 @@ class Settings(BaseSettings):
                       .replace("postgres://", "postgresql+asyncpg://", 1)
         return url  # SQLite-URL förblir oförändrad
     scrape_api_key: str = "change-me-in-production"
-    scrape_interval_hours: int = 6
+    scrape_interval_hours: int = 4
     request_timeout_seconds: int = 30
     playwright_headless: bool = True
     allowed_origins: str = "http://localhost:3000,https://cashmyphone.se"
