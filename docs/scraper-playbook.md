@@ -14,6 +14,7 @@ Den här filen är en praktisk checklista för hur vi lägger till en ny återf�
 
 ## Vanliga problem och losningar
 
+- **Cloudflare blockerar API-anrop:** Prova curl-cffi med Chrome-impersonering innan Playwright. Swappie blev stabilare när primärvägen blev direkta API-anrop med `AsyncSession(impersonate="chrome136")` och Playwright bara används som fallback.
 - **Tomma priser i prod:** Koden kan vara deployad men DB saknar rader. Kor `POST /api/scrape?retailer=...&sync=true` pa Railway och kontrollera `/api/retailers`.
 - **Retailer syns i `/api/prices` men inte pa CashMyPhone.se:** Kontrollera `app/pricing/crosswalk.py`. `/api/quote` visar bara handlare vars condition-nyckel matchar frontend-svaren.
 - **Fel pris fast scraper fungerar:** Kontrollera displayavrundning. PhoneHero visade avrundade priser, sa vi sparade deras displaypris med ceil till narmaste tiotal.
