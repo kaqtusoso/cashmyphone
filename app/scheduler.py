@@ -1,6 +1,6 @@
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,11 @@ def setup_scheduler():
 
     scheduler.add_job(
         scheduled_scrape,
-        trigger=IntervalTrigger(hours=settings.scrape_interval_hours),
+        trigger=CronTrigger(
+            hour=settings.scrape_cron_hours,
+            minute=0,
+            timezone=settings.scrape_timezone,
+        ),
         id="scrape_all",
         name="Scrapa alla återförsäljare",
         replace_existing=True,
@@ -31,4 +35,8 @@ def setup_scheduler():
     )
 
     scheduler.start()
-    logger.info(f"✅ Scheduler igång – kör var {settings.scrape_interval_hours}:e timme")
+    logger.info(
+        "✅ Scheduler igång – kör %s:00 (%s)",
+        settings.scrape_cron_hours,
+        settings.scrape_timezone,
+    )

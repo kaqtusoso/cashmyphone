@@ -56,7 +56,8 @@ uvicorn app.main:app --reload
 # Sätt miljövariabler i Railway
 SCRAPE_API_KEY=din-hemliga-nyckel
 DATABASE_URL=postgresql+asyncpg://...  # från Railway Postgres
-SCRAPE_INTERVAL_HOURS=4
+SCRAPE_CRON_HOURS=0,4,8,12,16,20
+SCRAPE_TIMEZONE=Europe/Stockholm
 PLAYWRIGHT_HEADLESS=true
 ALLOWED_ORIGINS=https://cashmyphone.se
 ```
@@ -151,7 +152,7 @@ FixPhonePro använder kompakta formelnycklar från deras publika JS:
 
 ## Anteckningar
 
-- Scraping körs schemalagt var 4:e timme (konfigurerbart via `SCRAPE_INTERVAL_HOURS`).
+- Scraping körs schemalagt kl. 00:00, 04:00, 08:00, 12:00, 16:00 och 20:00 svensk tid (konfigurerbart via `SCRAPE_CRON_HOURS` och `SCRAPE_TIMEZONE`).
 - Nya värderingar via `/api/quote` triggar inte scraping, utan läser bara senast sparade priser från databasen.
 - Manuell scraping körs bara via `POST /api/scrape`, till exempel när en ny återförsäljare har lagts till eller priser behöver uppdateras direkt.
 - Swappie och FixMyPhone kräver Playwright (ingår i Dockerfile)
