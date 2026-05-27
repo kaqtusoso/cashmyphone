@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, Header, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
+from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel
 from ..database import get_db
@@ -124,6 +125,7 @@ class RetailerQuote(BaseModel):
     condition_key: str
     price_sek:     int
     url:           Optional[str]
+    scraped_at:    datetime
 
 
 class QuoteResponse(BaseModel):
@@ -132,6 +134,7 @@ class QuoteResponse(BaseModel):
     quotes:     List[RetailerQuote]
     best_price: Optional[int]
     best_retailer: Optional[str]
+    prices_updated_at: Optional[datetime]
 
 
 @router.post(
@@ -193,6 +196,7 @@ async def get_quote(
             quotes=[],
             best_price=None,
             best_retailer=None,
+            prices_updated_at=None,
         )
 
     result = await db.execute(
@@ -214,18 +218,21 @@ async def get_quote(
             condition_key=row.condition,
             price_sek=row.price_sek,
             url=row.url,
+            scraped_at=row.scraped_at,
         ))
 
     # Sortera fallande på pris
     quotes.sort(key=lambda q: q.price_sek, reverse=True)
 
     best = quotes[0] if quotes else None
+    prices_updated_at = max((q.scraped_at for q in quotes), default=None)
     return QuoteResponse(
         model=model_normalized,
         storage_gb=req.storage_gb,
         quotes=quotes,
         best_price=best.price_sek if best else None,
         best_retailer=best.retailer if best else None,
+        prices_updated_at=prices_updated_at,
     )
 
 
@@ -253,8 +260,6 @@ async def import_prices(
         raise HTTPException(status_code=401, detail="Ogiltig API-nyckel")
 
     from sqlalchemy import update
-    from datetime import datetime
-
     # Markera gamla priser som inaktiva
     await db.execute(
         update(BuybackPrice)
