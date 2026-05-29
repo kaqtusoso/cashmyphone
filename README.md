@@ -31,6 +31,8 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 
 ## Lokal utveckling
 
+### Backend
+
 ```bash
 # Installera beroenden
 pip install -r requirements.txt
@@ -44,6 +46,21 @@ cp .env.example .env
 # Starta servern
 uvicorn app.main:app --reload
 ```
+
+### Frontend
+
+Lovable-exporten ligger i `frontend/` och körs som en vanlig Vite/React-app.
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+Frontenden använder `VITE_API_URL` för att nå CashMyPhone-backenden. Om variabeln saknas faller den tillbaka till den nuvarande Railway-backenden.
+
+Kontaktformuläret är förberett för Supabase Edge Functions, men mejlutskick är inte aktiverat ännu. Utan `VITE_SUPABASE_URL` och `VITE_SUPABASE_PUBLISHABLE_KEY` laddar sidan ändå, och formuläret visar ett felmeddelande vid försök att skicka.
 
 ## Deploy på Railway
 
@@ -159,3 +176,7 @@ FixPhonePro använder kompakta formelnycklar från deras publika JS:
 - Priser märks som `is_active=false` innan varje ny scraping-körning
 - PhoneHero-priser beräknas från publika Livewire-snapshots: baspris per lagring minus avdrag per formulärsvar.
 - reNewed-priser hämtas från samma Reusely-widget-API som deras säljsida använder.
+
+## Marknadsföring
+
+- [Marketing Agent Playbook](docs/marketing/agent-playbook.md) beskriver hur SEO-, content-, PR/data-, social- och conversion-agenter kan sättas upp för bred svensk exponering.
