@@ -1,89 +1,67 @@
 # Orderintegreringar
 
 CashMyPhone skickar order från frontend till backend-endpointen `POST /api/orders`.
-Backend skapar ett ordernummer och kan sedan skicka ordern vidare till Google Sheets
-och Resend om miljövariablerna är satta.
+Backend skapar ett ordernummer och kan sedan spara ordern i Google Sheets. Mail är
+förberett men avstängt tills vi väljer mailleverantör.
 
-## Miljövariabler
+## Railway-miljövariabler
 
 ```env
+GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+GOOGLE_SHEETS_SPREADSHEET_ID=
+GOOGLE_SHEETS_WORKSHEET_NAME=Orders
+
+# Valfri fallback om vi någon gång vill använda Apps Script i stället.
 GOOGLE_SHEETS_WEBHOOK_URL=
+
+# Lämnas tomt tills mailösning är vald.
 RESEND_API_KEY=
-ORDER_EMAIL_FROM=CashMyPhone <orders@cashmyphone.se>
+ORDER_EMAIL_FROM=
 ORDER_ADMIN_EMAIL=
 ORDER_SUBMISSION_TIMEOUT_SECONDS=10
 ```
 
-Om `GOOGLE_SHEETS_WEBHOOK_URL` saknas hoppar backend över Sheets men returnerar
-fortfarande en giltig orderbekräftelse.
+## Google Sheets via service account
 
-Om `RESEND_API_KEY` eller `ORDER_EMAIL_FROM` saknas hoppar backend över mailutskick
-men returnerar fortfarande en giltig orderbekräftelse.
+1. Skapa eller öppna Google Sheet-filen där ordrar ska sparas.
+2. Skapa ett ark/tab som heter `Orders` eller sätt `GOOGLE_SHEETS_WORKSHEET_NAME`
+   till det namn du använder.
+3. Dela Sheet-filen med service account-mejlen:
+   `cashmyphone-orders@cashmyphone-477623.iam.gserviceaccount.com`
+4. Ge service account-kontot rollen `Editor`.
+5. Kopiera spreadsheet-ID:t från URL:en:
+   `https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit`
+6. Lägg ID:t i Railway som `GOOGLE_SHEETS_SPREADSHEET_ID`.
+7. Lägg hela service account-JSON-filen i Railway som
+   `GOOGLE_SERVICE_ACCOUNT_JSON`.
+8. Säkerställ att Google Sheets API är aktiverat i Google Cloud-projektet.
 
-## Google Sheets via Apps Script
+Backend använder Google Sheets API och skriver automatiskt header-raden om arket
+är tomt. Därefter append:as varje order som en ny rad.
 
-1. Skapa ett Google Sheet med ett ark som heter `Orders`.
-2. Öppna `Extensions > Apps Script`.
-3. Klistra in scriptet nedan.
-4. Deploya som Web App.
-5. Välj att web appen körs som dig och att åtkomst tillåts för den som har länken.
-6. Lägg Web App-URL:en i `GOOGLE_SHEETS_WEBHOOK_URL`.
+## Kolumner
 
-```js
-const SHEET_NAME = "Orders";
+Orderrader skrivs med dessa kolumner:
 
-const HEADERS = [
-  "order_id",
-  "created_at",
-  "dealer",
-  "model",
-  "storage",
-  "price_sek",
-  "shipping",
-  "payment",
-  "first_name",
-  "last_name",
-  "personal_number",
-  "email",
-  "phone",
-  "address",
-  "postal_code",
-  "city",
-  "payment_details",
-  "condition_answers",
-];
-
-function doPost(e) {
-  const payload = JSON.parse(e.postData.contents);
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-
-  if (!sheet) {
-    throw new Error(`Sheet "${SHEET_NAME}" saknas`);
-  }
-
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(HEADERS);
-  }
-
-  sheet.appendRow(
-    HEADERS.map((key) => {
-      const value = payload[key];
-      return typeof value === "object" && value !== null ? JSON.stringify(value) : value || "";
-    })
-  );
-
-  return ContentService
-    .createTextOutput(JSON.stringify({ ok: true }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+```text
+order_id
+created_at
+dealer
+model
+storage
+price_sek
+shipping
+payment
+first_name
+last_name
+personal_number
+email
+phone
+address
+postal_code
+city
+payment_details
+condition_answers
 ```
 
-## Resend
-
-För mailutskick krävs:
-
-- Verifierad domän i Resend.
-- `RESEND_API_KEY` från Resend.
-- `ORDER_EMAIL_FROM` med en avsändare på den verifierade domänen.
-
-Backend skickar orderbekräftelsen via `https://api.resend.com/emails`.
+`payment_details` och `condition_answers` sparas som JSON-strängar i cellen.

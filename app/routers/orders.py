@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -11,6 +12,27 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["orders"])
+
+SHEET_HEADERS = [
+    "order_id",
+    "created_at",
+    "dealer",
+    "model",
+    "storage",
+    "price_sek",
+    "shipping",
+    "payment",
+    "first_name",
+    "last_name",
+    "personal_number",
+    "email",
+    "phone",
+    "address",
+    "postal_code",
+    "city",
+    "payment_details",
+    "condition_answers",
+]
 
 
 class OrderCustomer(BaseModel):
@@ -97,7 +119,103 @@ def _sheet_row(order: OrderOut) -> dict[str, Any]:
     }
 
 
-async def _send_to_google_sheet(order: OrderOut) -> IntegrationStatus:
+def _sheet_values(order: OrderOut) -> list[Any]:
+    row = _sheet_row(order)
+    values: list[Any] = []
+    for key in SHEET_HEADERS:
+        value = row.get(key)
+        if isinstance(value, (dict, list)):
+            values.append(json.dumps(value, ensure_ascii=False))
+        elif value is None:
+            values.append("")
+        else:
+            values.append(value)
+    return values
+
+
+def _load_service_account_info() -> dict[str, Any]:
+    raw = settings.google_service_account_json.strip()
+    if not raw:
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON saknas")
+
+    try:
+        info = json.loads(raw)
+    except json.JSONDecodeError:
+        # Railway values sometimes get pasted with extra surrounding quotes.
+        info = json.loads(raw.strip("'\""))
+
+    private_key = info.get("private_key")
+    if isinstance(private_key, str) and "\\n" in private_key:
+        info["private_key"] = private_key.replace("\\n", "\n")
+
+    return info
+
+
+async def _get_google_access_token() -> str:
+    from google.auth.transport.requests import Request
+    from google.oauth2.service_account import Credentials
+
+    credentials = Credentials.from_service_account_info(
+        _load_service_account_info(),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    credentials.refresh(Request())
+    return credentials.token
+
+
+async def _ensure_google_sheet_headers(client: httpx.AsyncClient, token: str) -> None:
+    sheet_name = settings.google_sheets_worksheet_name
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    encoded_range = httpx.URL(f"https://example.com/{sheet_name}!1:1").raw_path.decode().lstrip("/")
+    base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    get_response = await client.get(f"{base_url}/{encoded_range}", headers=headers)
+    get_response.raise_for_status()
+    existing_values = get_response.json().get("values", [])
+    if existing_values:
+        return
+
+    update_response = await client.put(
+        f"{base_url}/{encoded_range}",
+        params={"valueInputOption": "RAW"},
+        headers=headers,
+        json={"values": [SHEET_HEADERS]},
+    )
+    update_response.raise_for_status()
+
+
+async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
+    if not settings.google_service_account_json or not settings.google_sheets_spreadsheet_id:
+        return IntegrationStatus(
+            configured=False,
+            ok=True,
+            message="Google Sheets API saknar service account JSON eller spreadsheet ID; hoppade över.",
+        )
+
+    try:
+        token = await _get_google_access_token()
+        sheet_name = settings.google_sheets_worksheet_name
+        spreadsheet_id = settings.google_sheets_spreadsheet_id
+        encoded_range = httpx.URL(f"https://example.com/{sheet_name}!A:R").raw_path.decode().lstrip("/")
+
+        async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+            await _ensure_google_sheet_headers(client, token)
+            response = await client.post(
+                f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{encoded_range}:append",
+                params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
+                headers={"Authorization": f"Bearer {token}"},
+                json={"values": [_sheet_values(order)]},
+            )
+            response.raise_for_status()
+
+        return IntegrationStatus(configured=True, ok=True, message="Order skickad till Google Sheet via Sheets API.")
+    except Exception as exc:
+        logger.exception("Kunde inte skicka order %s till Google Sheets API", order.order_id)
+        return IntegrationStatus(configured=True, ok=False, message=str(exc))
+
+
+async def _send_to_google_sheet_webhook(order: OrderOut) -> IntegrationStatus:
     if not settings.google_sheets_webhook_url:
         return IntegrationStatus(configured=False, ok=True, message="Google Sheets-webhook saknas; hoppade över.")
 
@@ -105,10 +223,18 @@ async def _send_to_google_sheet(order: OrderOut) -> IntegrationStatus:
         async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
             response = await client.post(settings.google_sheets_webhook_url, json=_sheet_row(order))
             response.raise_for_status()
-        return IntegrationStatus(configured=True, ok=True, message="Order skickad till Google Sheet.")
+        return IntegrationStatus(configured=True, ok=True, message="Order skickad till Google Sheet via webhook.")
     except Exception as exc:
-        logger.exception("Kunde inte skicka order %s till Google Sheet", order.order_id)
+        logger.exception("Kunde inte skicka order %s till Google Sheet-webhook", order.order_id)
         return IntegrationStatus(configured=True, ok=False, message=str(exc))
+
+
+async def _send_to_google_sheet(order: OrderOut) -> IntegrationStatus:
+    api_status = await _send_to_google_sheet_api(order)
+    if api_status.configured or not settings.google_sheets_webhook_url:
+        return api_status
+
+    return await _send_to_google_sheet_webhook(order)
 
 
 def _confirmation_html(order: OrderOut) -> str:
