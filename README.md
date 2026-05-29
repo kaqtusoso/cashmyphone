@@ -49,10 +49,9 @@ uvicorn app.main:app --reload
 
 ### Frontend
 
-Lovable-exporten ligger i `frontend/` och körs som en vanlig Vite/React-app.
+Lovable/Vite-frontenden ligger i repo-roten så att Lovable kan synka GitHub-ändringar direkt.
 
 ```bash
-cd frontend
 npm install
 cp .env.example .env.local
 npm run dev
