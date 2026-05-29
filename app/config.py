@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     playwright_headless: bool = True
     allowed_origins: str = "http://localhost:3000,https://cashmyphone.se"
     environment: str = "development"
+    google_sheets_webhook_url: str = ""
+    resend_api_key: str = ""
+    order_email_from: str = ""
+    order_admin_email: str = ""
+    order_submission_timeout_seconds: int = 10
 
     @property
     def origins_list(self) -> List[str]:
