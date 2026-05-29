@@ -1,6 +1,11 @@
 import json
 import logging
+import smtplib
+from asyncio import to_thread
 from datetime import datetime, timezone
+from email.message import EmailMessage
+from email.utils import formataddr
+from html import escape
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -239,48 +244,88 @@ async def _send_to_google_sheet(order: OrderOut) -> IntegrationStatus:
 
 def _confirmation_html(order: OrderOut) -> str:
     price = f"{order.price_sek:,}".replace(",", " ")
+    customer_name = escape(order.customer.first_name)
+    order_id = escape(order.order_id)
+    model = escape(order.model)
+    storage = escape(order.storage)
+    dealer_name = escape(order.dealer_name)
+    shipping_label = escape(order.shipping_label)
+    payment_label = escape(order.payment.label)
+
     return f"""
     <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.5">
       <h1 style="color:#00B87A">Din beställning är mottagen</h1>
-      <p>Hej {order.customer.first_name},</p>
+      <p>Hej {customer_name},</p>
       <p>Tack för din order hos CashMyPhone. Vi har registrerat att du vill sälja:</p>
       <ul>
-        <li><strong>Ordernummer:</strong> {order.order_id}</li>
-        <li><strong>Mobil:</strong> {order.model} {order.storage}</li>
-        <li><strong>Köpare:</strong> {order.dealer_name}</li>
+        <li><strong>Ordernummer:</strong> {order_id}</li>
+        <li><strong>Mobil:</strong> {model} {storage}</li>
+        <li><strong>Köpare:</strong> {dealer_name}</li>
         <li><strong>Uppskattat pris:</strong> {price} kr</li>
-        <li><strong>Frakt:</strong> {order.shipping_label}</li>
+        <li><strong>Frakt:</strong> {shipping_label}</li>
+        <li><strong>Betalning:</strong> {payment_label}</li>
       </ul>
       <h2>Vad händer nu?</h2>
-      <p>Vi skickar vidare ordern och fraktinstruktioner följer enligt valt fraktsätt. När mobilen har mottagits och kontrollerats betalas pengarna ut enligt vald betalningsmetod.</p>
+      <p>Du får fraktinstruktioner och skickar mobilen när du är redo. {dealer_name} kontrollerar mobilen och betalar ut enligt valt betalningssätt.</p>
       <p>Hälsningar,<br>CashMyPhone</p>
     </div>
     """
 
 
-async def _send_confirmation_email(order: OrderOut) -> IntegrationStatus:
-    if not settings.resend_api_key or not settings.order_email_from:
-        return IntegrationStatus(configured=False, ok=True, message="Resend saknar API-nyckel eller avsändare; hoppade över.")
+def _confirmation_text(order: OrderOut) -> str:
+    price = f"{order.price_sek:,}".replace(",", " ")
+    return f"""Hej {order.customer.first_name},
 
-    recipients = [str(order.customer.email)]
+Tack för din order hos CashMyPhone.
+
+Ordernummer: {order.order_id}
+Mobil: {order.model} {order.storage}
+Köpare: {order.dealer_name}
+Uppskattat pris: {price} kr
+Frakt: {order.shipping_label}
+Betalning: {order.payment.label}
+
+Vad händer nu?
+Du får fraktinstruktioner och skickar mobilen när du är redo. {order.dealer_name} kontrollerar mobilen och betalar ut enligt valt betalningssätt.
+
+Hälsningar,
+CashMyPhone
+"""
+
+
+def _build_confirmation_email(order: OrderOut) -> EmailMessage:
+    from_email = settings.smtp_from_email or settings.order_email_from
+    from_name = settings.smtp_from_name or "CashMyPhone"
+
+    message = EmailMessage()
+    message["From"] = formataddr((from_name, from_email))
+    message["To"] = str(order.customer.email)
     if settings.order_admin_email:
-        recipients.append(settings.order_admin_email)
+        message["Bcc"] = settings.order_admin_email
+    if settings.smtp_reply_to:
+        message["Reply-To"] = settings.smtp_reply_to
+    message["Subject"] = f"Bekräftelse på din CashMyPhone-order {order.order_id}"
+    message.set_content(_confirmation_text(order))
+    message.add_alternative(_confirmation_html(order), subtype="html")
+    return message
 
-    payload = {
-        "from": settings.order_email_from,
-        "to": recipients,
-        "subject": f"Bekräftelse på din CashMyPhone-order {order.order_id}",
-        "html": _confirmation_html(order),
-    }
+
+def _send_confirmation_email_sync(order: OrderOut) -> None:
+    message = _build_confirmation_email(order)
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=settings.order_submission_timeout_seconds) as smtp:
+        if settings.smtp_use_tls:
+            smtp.starttls()
+        smtp.login(settings.smtp_username, settings.smtp_password)
+        smtp.send_message(message)
+
+
+async def _send_confirmation_email(order: OrderOut) -> IntegrationStatus:
+    from_email = settings.smtp_from_email or settings.order_email_from
+    if not settings.smtp_host or not settings.smtp_username or not settings.smtp_password or not from_email:
+        return IntegrationStatus(configured=False, ok=True, message="SMTP saknar host, login, lösenord eller avsändare; hoppade över.")
 
     try:
-        async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
-            response = await client.post(
-                "https://api.resend.com/emails",
-                headers={"Authorization": f"Bearer {settings.resend_api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            response.raise_for_status()
+        await to_thread(_send_confirmation_email_sync, order)
         return IntegrationStatus(configured=True, ok=True, message="Bekräftelsemail skickat.")
     except Exception as exc:
         logger.exception("Kunde inte skicka ordermail för %s", order.order_id)
