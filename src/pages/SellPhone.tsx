@@ -21,10 +21,8 @@ const SellPhone = () => {
         />
         <link rel="canonical" href={`https://cashmyphone.se/salja/${modelSlug}`} />
       </Helmet>
-      <main className="flex justify-center px-4 md:px-6 pt-6 md:pt-12 pb-8 md:pb-16">
-        <div className="w-full max-w-2xl">
-          <UnifiedFlow initialModel={model} />
-        </div>
+      <main>
+        <UnifiedFlow initialModel={model} />
       </main>
     </>
   );

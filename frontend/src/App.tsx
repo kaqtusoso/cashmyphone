@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -16,6 +16,8 @@ const ArticlesListPage = lazy(() => import("./pages/ArticlesListPage"));
 const ArticlePage = lazy(() => import("./pages/ArticlePage"));
 const AboutPage = lazy(() => import("./pages/AboutPage"));
 const SellPhone = lazy(() => import("./pages/SellPhone"));
+const Checkout = lazy(() => import("./pages/Checkout"));
+const Summary = lazy(() => import("./pages/Summary"));
 
 const queryClient = new QueryClient();
 
@@ -37,6 +39,33 @@ const DeferredOverlays = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
+const AppRoutes = () => {
+  const location = useLocation();
+  const useClaudeShell = location.pathname === "/" || location.pathname.startsWith("/salja/");
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      {!useClaudeShell && <Header />}
+      <div className="flex-1">
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="/" element={<Index />} />
+            <Route path="/artiklar" element={<ArticlesListPage />} />
+            <Route path="/artikel/:slug" element={<ArticlePage />} />
+            <Route path="/om-oss" element={<AboutPage />} />
+            <Route path="/salja/:modelSlug" element={<SellPhone />} />
+            <Route path="/checkout" element={<Checkout />} />
+            <Route path="/summary" element={<Summary />} />
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </div>
+      {!useClaudeShell && <Footer />}
+    </div>
+  );
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <HelmetProvider>
@@ -44,23 +73,7 @@ const App = () => (
         <ScrollToTop />
         <SavedOffersProvider>
           <DeferredOverlays>
-            <div className="flex flex-col min-h-screen">
-              <Header />
-              <div className="flex-1">
-                <Suspense fallback={null}>
-                  <Routes>
-                    <Route path="/" element={<Index />} />
-                    <Route path="/artiklar" element={<ArticlesListPage />} />
-                    <Route path="/artikel/:slug" element={<ArticlePage />} />
-                    <Route path="/om-oss" element={<AboutPage />} />
-                    <Route path="/salja/:modelSlug" element={<SellPhone />} />
-                    {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </Suspense>
-              </div>
-              <Footer />
-            </div>
+            <AppRoutes />
           </DeferredOverlays>
         </SavedOffersProvider>
       </BrowserRouter>
