@@ -1543,10 +1543,12 @@
 
 .claude-device-top img {
   position: absolute;
-  bottom: -1.3rem;
+  bottom: 0.35rem;
   left: 50%;
-  width: 5rem;
+  width: 5.2rem;
+  height: 5.2rem;
   max-width: none;
+  object-fit: contain;
   transform: translateX(-50%);
 }
 

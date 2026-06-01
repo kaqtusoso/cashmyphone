@@ -14,12 +14,12 @@ import {
 } from "@/types/condition";
 import { CompanyOffer, iphoneModels, storageByModel } from "@/data/mockData";
 import { fetchQuotes } from "@/utils/apiQuote";
+import { getIphoneImage } from "@/utils/iphoneImage";
 import { modelToSlug } from "@/utils/modelSlug";
 import { useSavedOffers } from "@/hooks/useSavedOffers";
 import type { SavedOffer } from "@/types/savedOffers";
 
 import cmpLogo from "@/assets/logo-green.png";
-import phoneMockup from "@/assets/mockup-iphone-new.png";
 import swappieLogo from "@/assets/swappie-logo.png";
 import fixmyphoneLogo from "@/assets/fixmyphone-logo.png";
 import fixiphoneLogo from "@/assets/fixiphone-logo.png";
@@ -265,6 +265,7 @@ const DevicePanel = ({
   answers: ConditionAnswers;
   step: Exclude<StepKey, "model" | "results">;
 }) => {
+  const phoneImage = getIphoneImage(model);
   const rows = [
     { key: "storage", label: "Lagring", value: storage ? formatStorage(storage) : "-" },
     { key: "battery", label: "Batteri", value: answers.batteryHealth === null ? "-" : `${answers.batteryHealth} %` },
@@ -290,7 +291,7 @@ const DevicePanel = ({
           </h2>
         </div>
         <span>
-          <img src={phoneMockup} alt="" />
+          <img src={phoneImage} alt={model} />
         </span>
       </div>
       <div className="claude-device-rows">
