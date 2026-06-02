@@ -10,7 +10,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from ..config import settings
@@ -18,26 +18,29 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["orders"])
 
-SHEET_HEADERS = [
-    "order_id",
-    "created_at",
-    "dealer",
-    "model",
-    "storage",
-    "price_sek",
-    "shipping",
-    "payment",
-    "first_name",
-    "last_name",
-    "personal_number",
-    "email",
-    "phone",
-    "address",
-    "postal_code",
-    "city",
-    "payment_details",
-    "condition_answers",
+SHEET_COLUMNS = [
+    ("order_id", "Ordernummer", 190),
+    ("created_at", "Datum", 170),
+    ("dealer", "Köpare", 130),
+    ("model", "Modell", 170),
+    ("storage", "Lagring", 95),
+    ("price_sek", "Pris (SEK)", 105),
+    ("shipping", "Frakt", 190),
+    ("payment", "Betalning", 120),
+    ("first_name", "Förnamn", 120),
+    ("last_name", "Efternamn", 130),
+    ("personal_number", "Personnummer", 145),
+    ("email", "E-post", 220),
+    ("phone", "Telefon", 140),
+    ("address", "Adress", 180),
+    ("postal_code", "Postnummer", 110),
+    ("city", "Ort", 130),
+    ("payment_details", "Betalningsuppgifter", 230),
+    ("condition_answers", "Skick / frågesvar", 380),
 ]
+SHEET_KEYS = [key for key, _, _ in SHEET_COLUMNS]
+SHEET_HEADERS = [header for _, header, _ in SHEET_COLUMNS]
+SHEET_HEADER_TO_KEY = {header: key for key, header, _ in SHEET_COLUMNS}
 
 
 class OrderCustomer(BaseModel):
@@ -96,10 +99,94 @@ def _make_order(payload: OrderCreate) -> OrderOut:
     return OrderOut(order_id=order_id, created_at=created_at, **payload.model_dump())
 
 
+def _format_sheet_datetime(value: str) -> str:
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _format_payment_details(payment: OrderPayment) -> str:
+    if payment.method == "swish" and payment.swish_number:
+        return f"Swish: {payment.swish_number}"
+
+    details = []
+    if payment.clearing_number:
+        details.append(f"Clearing: {payment.clearing_number}")
+    if payment.account_number:
+        details.append(f"Konto: {payment.account_number}")
+    if payment.iban_number:
+        details.append(f"IBAN: {payment.iban_number}")
+    return "\n".join(details)
+
+
+def _format_condition_answers(condition_answers: dict[str, Any] | None) -> str:
+    if not condition_answers:
+        return ""
+
+    labels = {
+        "batteryHealth": "Batterihälsa",
+        "screenGlass": "Skärmglas",
+        "screenWear": "Skärmskick",
+        "sidesWear": "Sidor",
+        "backWear": "Baksida",
+        "screenFunctionAnswered": "Skärmtest besvarat",
+    }
+    value_labels = {
+        "chipped": "Sprickor/flisor",
+        "scratched": "Repor",
+        "none": "Inga skador",
+        "visible": "Tydligt slitage",
+        "some": "Visst slitage",
+        "minimal": "Minimalt slitage",
+        "cracked": "Sprucken",
+    }
+    functional_labels = {
+        "powersOn": "Startar normalt",
+        "network": "Nätverk fungerar",
+        "faceId": "Face ID fungerar",
+        "selfieCamera": "Selfiekamera fungerar",
+        "speaker": "Högtalare fungerar",
+        "bentOrWaterDamaged": "Böjd/vattenskadad",
+    }
+
+    rows: list[str] = []
+    for key in ("batteryHealth", "screenGlass", "screenWear", "sidesWear", "backWear"):
+        value = condition_answers.get(key)
+        if value is None:
+            continue
+        formatted_value = f"{value}%" if key == "batteryHealth" else value_labels.get(str(value), str(value))
+        rows.append(f"{labels[key]}: {formatted_value}")
+
+    functional = condition_answers.get("functional")
+    if isinstance(functional, dict):
+        for key, label in functional_labels.items():
+            value = functional.get(key)
+            if value is None:
+                continue
+            rows.append(f"{label}: {'Ja' if value else 'Nej'}")
+
+    screen_function = condition_answers.get("screenFunction")
+    if isinstance(screen_function, dict):
+        issues = [
+            label
+            for key, label in (
+                ("brightSpots", "Ljusa fläckar"),
+                ("deadPixels", "Döda pixlar"),
+                ("linesOrBurnIn", "Linjer/inbränning"),
+            )
+            if screen_function.get(key)
+        ]
+        rows.append(f"Skärmfunktion: {', '.join(issues) if issues else 'OK'}")
+
+    return "\n".join(rows)
+
+
 def _sheet_row(order: OrderOut) -> dict[str, Any]:
     return {
         "order_id": order.order_id,
-        "created_at": order.created_at,
+        "created_at": _format_sheet_datetime(order.created_at),
         "dealer": order.dealer_name,
         "model": order.model,
         "storage": order.storage,
@@ -114,20 +201,15 @@ def _sheet_row(order: OrderOut) -> dict[str, Any]:
         "address": order.customer.address,
         "postal_code": order.customer.postal_code,
         "city": order.customer.city,
-        "payment_details": {
-            "clearing_number": order.payment.clearing_number,
-            "account_number": order.payment.account_number,
-            "iban_number": order.payment.iban_number,
-            "swish_number": order.payment.swish_number,
-        },
-        "condition_answers": order.condition_answers,
+        "payment_details": _format_payment_details(order.payment),
+        "condition_answers": _format_condition_answers(order.condition_answers),
     }
 
 
 def _sheet_values(order: OrderOut) -> list[Any]:
     row = _sheet_row(order)
     values: list[Any] = []
-    for key in SHEET_HEADERS:
+    for key in SHEET_KEYS:
         value = row.get(key)
         if isinstance(value, (dict, list)):
             values.append(json.dumps(value, ensure_ascii=False))
@@ -136,6 +218,37 @@ def _sheet_values(order: OrderOut) -> list[Any]:
         else:
             values.append(value)
     return values
+
+
+def _normalize_existing_sheet_row(headers: list[str], row: list[Any]) -> list[Any]:
+    mapped: dict[str, Any] = {}
+    for index, header in enumerate(headers):
+        key = header if header in SHEET_KEYS else SHEET_HEADER_TO_KEY.get(header)
+        if key:
+            mapped[key] = row[index] if index < len(row) else ""
+
+    if mapped.get("created_at"):
+        mapped["created_at"] = _format_sheet_datetime(str(mapped["created_at"]))
+
+    payment_details = mapped.get("payment_details")
+    if isinstance(payment_details, str):
+        try:
+            parsed = json.loads(payment_details)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            mapped["payment_details"] = _format_payment_details(OrderPayment(method="", label="", **parsed))
+
+    condition_answers = mapped.get("condition_answers")
+    if isinstance(condition_answers, str):
+        try:
+            parsed = json.loads(condition_answers)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            mapped["condition_answers"] = _format_condition_answers(parsed)
+
+    return [mapped.get(key, "") for key in SHEET_KEYS]
 
 
 def _load_service_account_info() -> dict[str, Any]:
@@ -168,26 +281,191 @@ async def _get_google_access_token() -> str:
     return credentials.token
 
 
-async def _ensure_google_sheet_headers(client: httpx.AsyncClient, token: str) -> None:
+async def _get_google_sheet_id(client: httpx.AsyncClient, token: str) -> int:
+    sheet_name = settings.google_sheets_worksheet_name
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.get(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}",
+        params={"fields": "sheets(properties(sheetId,title))"},
+        headers=headers,
+    )
+    response.raise_for_status()
+
+    for sheet in response.json().get("sheets", []):
+        properties = sheet.get("properties", {})
+        if properties.get("title") == sheet_name:
+            return int(properties["sheetId"])
+
+    raise ValueError(f"Worksheet '{sheet_name}' saknas i Google Sheet.")
+
+
+async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: int) -> None:
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    column_count = len(SHEET_COLUMNS)
+    requests: list[dict[str, Any]] = [
+        {
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {"frozenRowCount": 1},
+                },
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": column_count,
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": {"red": 0.0, "green": 0.45, "blue": 0.31},
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE",
+                        "wrapStrategy": "WRAP",
+                        "textFormat": {
+                            "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+                            "bold": True,
+                            "fontSize": 11,
+                        },
+                    }
+                },
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)",
+            }
+        },
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": column_count,
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "verticalAlignment": "TOP",
+                        "wrapStrategy": "WRAP",
+                        "textFormat": {"fontSize": 10},
+                    }
+                },
+                "fields": "userEnteredFormat(verticalAlignment,wrapStrategy,textFormat.fontSize)",
+            }
+        },
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "startColumnIndex": 5,
+                    "endColumnIndex": 6,
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
+                        "horizontalAlignment": "RIGHT",
+                    }
+                },
+                "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
+            }
+        },
+        {
+            "setBasicFilter": {
+                "filter": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": column_count,
+                    }
+                }
+            }
+        },
+    ]
+
+    for index, (_, _, width) in enumerate(SHEET_COLUMNS):
+        requests.append(
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": index,
+                        "endIndex": index + 1,
+                    },
+                    "properties": {"pixelSize": width},
+                    "fields": "pixelSize",
+                }
+            }
+        )
+
+    response = await client.post(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"requests": requests},
+    )
+    response.raise_for_status()
+
+
+async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> None:
     sheet_name = settings.google_sheets_worksheet_name
     spreadsheet_id = settings.google_sheets_spreadsheet_id
     encoded_range = httpx.URL(f"https://example.com/{sheet_name}!1:1").raw_path.decode().lstrip("/")
     base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values"
     headers = {"Authorization": f"Bearer {token}"}
+    sheet_id = await _get_google_sheet_id(client, token)
 
     get_response = await client.get(f"{base_url}/{encoded_range}", headers=headers)
     get_response.raise_for_status()
     existing_values = get_response.json().get("values", [])
+
+    if not existing_values or existing_values[0] != SHEET_HEADERS:
+        update_response = await client.put(
+            f"{base_url}/{encoded_range}",
+            params={"valueInputOption": "RAW"},
+            headers=headers,
+            json={"values": [SHEET_HEADERS]},
+        )
+        update_response.raise_for_status()
+
+    await _format_google_sheet(client, token, sheet_id)
+
+
+async def _rebuild_google_sheet(client: httpx.AsyncClient, token: str) -> None:
+    sheet_name = settings.google_sheets_worksheet_name
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    encoded_range = httpx.URL(f"https://example.com/{sheet_name}!A:R").raw_path.decode().lstrip("/")
+    base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values"
+    headers = {"Authorization": f"Bearer {token}"}
+    sheet_id = await _get_google_sheet_id(client, token)
+
+    get_response = await client.get(f"{base_url}/{encoded_range}", headers=headers)
+    get_response.raise_for_status()
+    existing_values = get_response.json().get("values", [])
+
+    rows: list[list[Any]] = [SHEET_HEADERS]
     if existing_values:
-        return
+        source_headers = existing_values[0]
+        for row in existing_values[1:]:
+            if any(str(cell).strip() for cell in row):
+                rows.append(_normalize_existing_sheet_row(source_headers, row))
+
+    clear_response = await client.post(f"{base_url}/{encoded_range}:clear", headers=headers, json={})
+    clear_response.raise_for_status()
 
     update_response = await client.put(
         f"{base_url}/{encoded_range}",
-        params={"valueInputOption": "RAW"},
+        params={"valueInputOption": "USER_ENTERED"},
         headers=headers,
-        json={"values": [SHEET_HEADERS]},
+        json={"values": rows},
     )
     update_response.raise_for_status()
+
+    await _format_google_sheet(client, token, sheet_id)
 
 
 async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
@@ -205,7 +483,7 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
         encoded_range = httpx.URL(f"https://example.com/{sheet_name}!A:R").raw_path.decode().lstrip("/")
 
         async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
-            await _ensure_google_sheet_headers(client, token)
+            await _ensure_google_sheet_layout(client, token)
             response = await client.post(
                 f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{encoded_range}:append",
                 params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
@@ -240,6 +518,28 @@ async def _send_to_google_sheet(order: OrderOut) -> IntegrationStatus:
         return api_status
 
     return await _send_to_google_sheet_webhook(order)
+
+
+@router.post("/orders/sheets/layout", response_model=IntegrationStatus)
+async def refresh_order_sheet_layout(x_api_key: str = Header(..., alias="X-API-Key")):
+    if x_api_key != settings.scrape_api_key:
+        raise HTTPException(status_code=401, detail="Ogiltig API-nyckel")
+
+    if not settings.google_service_account_json or not settings.google_sheets_spreadsheet_id:
+        return IntegrationStatus(
+            configured=False,
+            ok=False,
+            message="Google Sheets API saknar service account JSON eller spreadsheet ID.",
+        )
+
+    try:
+        token = await _get_google_access_token()
+        async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+            await _rebuild_google_sheet(client, token)
+        return IntegrationStatus(configured=True, ok=True, message="Orderarket har formaterats.")
+    except Exception as exc:
+        logger.exception("Kunde inte formatera orderarket")
+        return IntegrationStatus(configured=True, ok=False, message=str(exc))
 
 
 def _confirmation_html(order: OrderOut) -> str:
