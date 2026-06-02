@@ -348,12 +348,18 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
                 },
                 "cell": {
                     "userEnteredFormat": {
-                        "verticalAlignment": "TOP",
+                        "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+                        "horizontalAlignment": "LEFT",
+                        "verticalAlignment": "MIDDLE",
                         "wrapStrategy": "CLIP",
-                        "textFormat": {"fontSize": 10},
+                        "textFormat": {
+                            "foregroundColor": {"red": 0.08, "green": 0.1, "blue": 0.15},
+                            "bold": False,
+                            "fontSize": 10,
+                        },
                     }
                 },
-                "fields": "userEnteredFormat(verticalAlignment,wrapStrategy,textFormat.fontSize)",
+                "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)",
             }
         },
         {
