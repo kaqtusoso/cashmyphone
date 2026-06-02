@@ -363,7 +363,7 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
                     "dimension": "ROWS",
                     "startIndex": 1,
                 },
-                "properties": {"pixelSize": 24},
+                "properties": {"pixelSize": 21},
                 "fields": "pixelSize",
             }
         },
