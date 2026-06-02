@@ -237,7 +237,7 @@ def _normalize_existing_sheet_row(headers: list[str], row: list[Any]) -> list[An
         except json.JSONDecodeError:
             parsed = None
         if isinstance(parsed, dict):
-            mapped["payment_details"] = _format_payment_details(OrderPayment(method="", label="", **parsed))
+            mapped["payment_details"] = _format_payment_details(OrderPayment(method="bank", label="Banköverföring", **parsed))
 
     condition_answers = mapped.get("condition_answers")
     if isinstance(condition_answers, str):
