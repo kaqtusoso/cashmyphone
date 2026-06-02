@@ -349,11 +349,22 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
                 "cell": {
                     "userEnteredFormat": {
                         "verticalAlignment": "TOP",
-                        "wrapStrategy": "WRAP",
+                        "wrapStrategy": "CLIP",
                         "textFormat": {"fontSize": 10},
                     }
                 },
                 "fields": "userEnteredFormat(verticalAlignment,wrapStrategy,textFormat.fontSize)",
+            }
+        },
+        {
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": 1,
+                },
+                "properties": {"pixelSize": 38},
+                "fields": "pixelSize",
             }
         },
         {
