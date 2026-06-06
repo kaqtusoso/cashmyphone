@@ -1,3 +1,13 @@
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
 FROM python:3.12-slim-bookworm
 
 # Systemberoenden för Playwright + Chromium
@@ -51,6 +61,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
 COPY . .
+COPY --from=frontend-builder /app/dist ./dist
 
 # Skapa databas-mapp
 RUN mkdir -p /app/data

@@ -1,7 +1,10 @@
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from .database import init_db
 from .scheduler import setup_scheduler, scheduler
 from .routers import orders, prices
@@ -12,6 +15,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
+INDEX_HTML = DIST_DIR / "index.html"
 
 
 @asynccontextmanager
@@ -52,6 +57,9 @@ async def health():
 
 @app.get("/", tags=["system"])
 async def root():
+    if INDEX_HTML.exists():
+        return FileResponse(INDEX_HTML)
+
     return {
         "name": "CashMyPhone API",
         "docs": "/docs",
@@ -66,3 +74,17 @@ async def root():
             "/api/import-prices/{retailer}",
         ],
     }
+
+
+if (DIST_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa(full_path: str):
+    requested_file = DIST_DIR / full_path
+    if requested_file.is_file():
+        return FileResponse(requested_file)
+    if INDEX_HTML.exists():
+        return FileResponse(INDEX_HTML)
+    return {"detail": "Not Found"}
