@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -6,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from .database import init_db
-from .scheduler import setup_scheduler, scheduler
+from .scheduler import setup_scheduler, scheduler, scrape_if_prices_empty
 from .routers import orders, prices
 from .config import settings
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 CashMyPhone API startar...")
     await init_db()
     setup_scheduler()
+    asyncio.create_task(scrape_if_prices_empty())
     yield
     # Shutdown
     scheduler.shutdown(wait=False)
