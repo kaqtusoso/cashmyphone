@@ -1,5 +1,5 @@
 import { ConditionAnswers } from "./condition";
-import { CompanyOffer } from "@/data/mockData";
+import { CompanyOffer } from "@/types/offers";
 
 export interface SavedOffer {
   id: string;

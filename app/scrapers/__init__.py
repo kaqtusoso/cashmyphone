@@ -4,6 +4,7 @@ from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import ScrapeStatusOut
 from ..database import AsyncSessionLocal
+from ..config import settings
 from .swappie import SwappieScraper
 from .phonehero import PhoneHeroScraper
 from .renewed import RenewedScraper
@@ -45,7 +46,7 @@ SCRAPER_TIMEOUT = 120  # sekunder per scraper
 
 
 async def run_all_scrapers(db: AsyncSession) -> List[ScrapeStatusOut]:
-    """Kör alla scrapers parallellt – varje scraper får en egen DB-session."""
+    """Kör alla scrapers. SQLite körs sekventiellt för att undvika skrivlås."""
 
     async def run_isolated(retailer_id: str, scraper_class) -> ScrapeStatusOut:
         async with AsyncSessionLocal() as session:
@@ -55,11 +56,24 @@ async def run_all_scrapers(db: AsyncSession) -> List[ScrapeStatusOut]:
                 timeout=SCRAPER_TIMEOUT,
             )
 
+    if "sqlite" in settings.async_database_url:
+        results: List[ScrapeStatusOut] = []
+        for retailer_id, scraper_class in SCRAPERS.items():
+            try:
+                results.append(await run_isolated(retailer_id, scraper_class))
+            except Exception as exc:
+                logger.error(f"Scraper '{retailer_id}' kraschade: {exc}")
+                results.append(ScrapeStatusOut(
+                    retailer=retailer_id,
+                    status="error",
+                    message=str(exc),
+                ))
+        return results
+
     tasks = [
         run_isolated(rid, cls)
         for rid, cls in SCRAPERS.items()
     ]
-
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     results = []

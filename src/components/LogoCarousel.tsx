@@ -1,15 +1,21 @@
 import swappie from "@/assets/swappie-logo.png";
+import phonehero from "@/assets/phonehero-logo.svg";
 import fixmyphone from "@/assets/fixmyphone-logo.png";
 import happyphone from "@/assets/happyphone-logo.png";
 import telestore from "@/assets/telestore-logo.png";
 import renewed from "@/assets/renewed-logo.png";
+import fixiphone from "@/assets/fixiphone-logo.png";
+import fixphonepro from "@/assets/fixphonepro-logo.png";
 
 const logos = [
   { src: swappie, alt: "Swappie" },
+  { src: phonehero, alt: "PhoneHero" },
   { src: fixmyphone, alt: "FixMyPhone" },
   { src: happyphone, alt: "HappyPhone" },
   { src: telestore, alt: "Telestore" },
   { src: renewed, alt: "Renewed" },
+  { src: fixiphone, alt: "Fixiphone" },
+  { src: fixphonepro, alt: "FixPhonePro" },
 ];
 
 const repeatedLogos = Array.from({ length: 3 }, () => logos).flat();

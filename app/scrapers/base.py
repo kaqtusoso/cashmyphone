@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update
+from sqlalchemy import delete
 from ..models import BuybackPrice, ScraperRun, ScrapeStatusOut
 
 logger = logging.getLogger(__name__)
@@ -47,11 +47,11 @@ class BaseScraper(ABC):
                 return ScrapeStatusOut(retailer=self.retailer_id, status="error",
                                        message="Inga priser hittades")
 
-            # Markera gamla priser som inaktiva
+            # Ersätt återförsäljarens gamla prislista. Vi behöver bara senaste
+            # aktiva priserna i API:t; historik gör databasen onödigt stor.
             await db.execute(
-                update(BuybackPrice)
+                delete(BuybackPrice)
                 .where(BuybackPrice.retailer == self.retailer_id)
-                .values(is_active=False)
             )
 
             # Lägg till nya priser

@@ -54,6 +54,7 @@ COPY . .
 
 # Skapa databas-mapp
 RUN mkdir -p /app/data
+ENV DATABASE_URL=sqlite+aiosqlite:////app/data/cashmyphone.db
 
 EXPOSE 8000
 

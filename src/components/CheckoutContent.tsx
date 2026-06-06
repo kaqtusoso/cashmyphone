@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,9 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Loader2, Check, Info } from "lucide-react";
+import { Check, Info } from "lucide-react";
 import TermsDialog from "@/components/TermsDialog";
 import { useSavedOffers } from "@/hooks/useSavedOffers";
+import { formatPersonalNumber } from "@/utils/checkoutValidation";
+import { makeOptimisticOrder, pendingOrderIntegrations, submitOrder as submitOrderRequest } from "@/utils/orders";
 
 // =====================
 // Schema & Types
@@ -25,7 +27,7 @@ const checkoutSchema = z
     personalNumber: z
       .string()
       .min(1, "Personnummer krävs")
-      .regex(/^(\d{6}|\d{8})-?\d{4}$/, "Ogiltigt personnummer (ÅÅÅÅMMDD-XXXX)"),
+      .regex(/^\d{8}-?\d{4}$/, "Ogiltigt personnummer (ÅÅÅÅMMDD-XXXX)"),
     address: z.string().min(1, "Gatuadress krävs"),
     postalCode: z.string().min(1, "Postnummer krävs"),
     city: z.string().min(1, "Stad krävs"),
@@ -36,6 +38,7 @@ const checkoutSchema = z
     accountNumber: z.string().optional(),
     ibanNumber: z.string().optional(),
     swishNumber: z.string().optional(),
+    paypalEmail: z.string().optional(),
     findMyIphoneDisabled: z.boolean().optional(),
     termsAccepted: z.boolean().optional(),
   })
@@ -51,6 +54,9 @@ const checkoutSchema = z
     }
     if (data.paymentMethod === "swish" && !data.swishNumber) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Swish-nummer krävs", path: ["swishNumber"] });
+    }
+    if (data.paymentMethod === "paypal" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.paypalEmail || "")) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "PayPal-e-post krävs", path: ["paypalEmail"] });
     }
   });
 
@@ -68,6 +74,10 @@ type PaymentOption = {
   label: string;
   requiresBankDetails: boolean;
 };
+
+const paypalFee = (priceSek: number) => (priceSek >= 5000 ? 100 : Math.round(priceSek * 0.02));
+const ORDER_SUBMIT_ANIMATION_MS = 800;
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export type DealerConfig = {
   name: string;
@@ -96,7 +106,10 @@ export const dealerConfig: Record<string, DealerConfig> = {
         bullets: ["Kostnadsfritt", "Skriv ut hemma", "Skicka när det passar dig"],
       },
     ],
-    paymentOptions: [{ id: "bank", label: "Banköverföring", requiresBankDetails: true }],
+    paymentOptions: [
+      { id: "paypal", label: "PayPal", requiresBankDetails: false },
+      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
+    ],
   },
   fixmyphone: {
     name: "FixMyPhone",
@@ -180,6 +193,56 @@ export const dealerConfig: Record<string, DealerConfig> = {
       },
     ],
     paymentOptions: [{ id: "bank", label: "Banköverföring", requiresBankDetails: true }],
+  },
+  phonehero: {
+    name: "PhoneHero",
+    shippingOptions: [
+      {
+        id: "email-label",
+        label: "Fraktsedel via e-post",
+        description: "Få fraktsedeln direkt till din inkorg",
+        bullets: ["Kostnadsfritt", "Skriv ut hemma", "Skicka när det passar dig"],
+      },
+      {
+        id: "sales-package",
+        label: "Gratis försäljningspaket",
+        description: "Levereras hem till dig inom 3–5 arbetsdagar",
+        bullets: ["Gratis & säkert", "Fri fraktetikett ingår", "Skyddar din enhet"],
+      },
+    ],
+    paymentOptions: [
+      { id: "swish", label: "Swish", requiresBankDetails: false },
+      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
+    ],
+  },
+  fixiphone: {
+    name: "FixiPhone",
+    shippingOptions: [
+      {
+        id: "email-label",
+        label: "Fraktsedel via e-post",
+        description: "Få fraktsedeln direkt till din inkorg",
+        bullets: ["Fri frakt", "Spårbar försändelse", "Instruktioner via e-post"],
+      },
+    ],
+    paymentOptions: [
+      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
+    ],
+  },
+  fixphonepro: {
+    name: "FixTech",
+    shippingOptions: [
+      {
+        id: "email-label",
+        label: "Fraktsedel via e-post",
+        description: "Få fraktsedeln direkt till din inkorg",
+        bullets: ["Fri frakt", "Spårbar försändelse", "Instruktioner via e-post"],
+      },
+    ],
+    paymentOptions: [
+      { id: "swish", label: "Swish", requiresBankDetails: false },
+      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
+    ],
   },
   cleverbuy: {
     name: "CleverBuy",
@@ -288,6 +351,7 @@ const CheckoutContent = ({
       if (pm === "bank") fields.push("clearingNumber", "accountNumber");
       if (pm === "bank-iban") fields.push("ibanNumber");
       if (pm === "swish") fields.push("swishNumber");
+      if (pm === "paypal") fields.push("paypalEmail");
 
       if (fields.length) {
         const ok = await trigger(fields, { shouldFocus: false });
@@ -305,58 +369,79 @@ const CheckoutContent = ({
     if (currentStep > 1) setCurrentStep(currentStep - 1);
   };
 
+  const priceSek = parseInt(price || "0", 10);
+  const paypalFeeSek = paypalFee(priceSek);
+  const paypalNetSek = Math.max(0, priceSek - paypalFeeSek);
   const estimatedPrice = price ? `${price} kr` : "–";
-
-  const handleNavigateToSummary = useCallback(() => {
-    const data = getValues();
-    navigate("/summary", {
-      state: { ...data, model, storage, price: estimatedPrice, dealer: config.name },
-    });
-  }, [navigate, getValues, model, storage, estimatedPrice, config.name]);
 
   const submitOrder = async (data: CheckoutFormData) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
     try {
-      await fetch("https://vina-unflutterable-madlyn.ngrok-free.dev/submit_order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          storage,
-          vendor: config.name,
-          price: parseInt(price || "0"),
-          shippingOption: data.shippingOption,
-          contact: {
-            firstName: data.firstName,
-            lastName: data.lastName,
-            personalNumber: data.personalNumber,
-            address: data.address,
-            postalCode: data.postalCode,
-            city: data.city,
-            phone: data.phone,
-            email: data.email,
-          },
-          payment: {
-            method: data.paymentMethod,
-            details:
-              data.paymentMethod === "bank"
-                ? `Clearing: ${data.clearingNumber}, Konto: ${data.accountNumber}`
-                : data.paymentMethod === "bank-iban"
-                  ? `IBAN: ${data.ibanNumber}`
-                  : `Swish: ${data.swishNumber}`,
-          },
-          answers: conditionAnswers,
-        }),
-      });
+      const shipping = config.shippingOptions.find((option) => option.id === data.shippingOption);
+      const payment = config.paymentOptions.find((option) => option.id === data.paymentMethod);
+      const payload = {
+        model,
+        storage,
+        dealer_id: dealer,
+        dealer_name: config.name,
+        price_sek: parseInt(price || "0", 10),
+        shipping_option: data.shippingOption || "",
+        shipping_label: shipping?.label || data.shippingOption || "",
+        customer: {
+          first_name: data.firstName,
+          last_name: data.lastName,
+          personal_number: data.personalNumber,
+          address: data.address,
+          postal_code: data.postalCode,
+          city: data.city,
+          phone: data.phone,
+          email: data.email,
+        },
+        payment: {
+          method: data.paymentMethod || "",
+          label: payment?.label || data.paymentMethod || "",
+          clearing_number: data.clearingNumber,
+          account_number: data.accountNumber,
+          iban_number: data.ibanNumber,
+          swish_number: data.swishNumber,
+          paypal_email: data.paypalEmail,
+        },
+        condition_answers: conditionAnswers,
+        source: "cashmyphone_web" as const,
+      };
+      const optimisticOrder = makeOptimisticOrder(payload);
+      const outboundPayload = { ...payload, client_order_id: optimisticOrder.order_id };
+      let resolvedOrder = optimisticOrder;
 
+      void submitOrderRequest(outboundPayload)
+        .then((response) => {
+          resolvedOrder = response.order;
+          sessionStorage.setItem("cashmyphone:last-order", JSON.stringify(response.order));
+        })
+        .catch((error) => {
+          if (import.meta.env.DEV) console.error("Fel vid orderregistrering i bakgrunden:", error);
+        });
+
+      await wait(ORDER_SUBMIT_ANIMATION_MS);
+
+      sessionStorage.setItem("cashmyphone:last-order", JSON.stringify(resolvedOrder));
       if (savedOfferId) removeSavedOffer(savedOfferId);
+
+      navigate("/summary", {
+        state: {
+          order: resolvedOrder,
+          integrations: pendingOrderIntegrations(),
+        },
+      });
     } catch (err) {
       if (import.meta.env.DEV) console.error("Fel vid inskick:", err);
+      toast.error("Ordern kunde inte registreras", {
+        description: "Försök igen om en stund eller kontakta oss så hjälper vi dig.",
+      });
+      setIsSubmitting(false);
     }
-
-    setTimeout(() => handleNavigateToSummary(), 1500);
   };
 
   const outerClass = compact ? "" : "max-w-7xl mx-auto";
@@ -447,7 +532,11 @@ const CheckoutContent = ({
                       inputMode="numeric"
                       placeholder="ÅÅÅÅMMDD-XXXX"
                       className="h-10"
-                      {...register("personalNumber")}
+                      {...register("personalNumber", {
+                        onChange: (event) => {
+                          setValue("personalNumber", formatPersonalNumber(event.currentTarget.value), { shouldValidate: showErrors });
+                        },
+                      })}
                     />
                     {showErrors && errors.personalNumber && (
                       <p className="text-xs text-destructive">{errors.personalNumber.message}</p>
@@ -552,7 +641,9 @@ const CheckoutContent = ({
                                     ? "Pengar direkt till ditt bankkonto"
                                     : option.id === "bank-iban"
                                       ? "Pengar till bankkonto via IBAN"
-                                      : "Snabb utbetalning via Swish"}
+                                      : option.id === "paypal"
+                                        ? `Avgift ${priceSek >= 5000 ? "100 kr" : "2%"} dras från utbetalningen`
+                                        : "Snabb utbetalning via Swish"}
                                 </p>
                               </div>
                               <div
@@ -630,6 +721,27 @@ const CheckoutContent = ({
                                     )}
                                   </div>
                                 )}
+
+                                {option.id === "paypal" && (
+                                  <div className="space-y-2">
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">PayPal-e-post</Label>
+                                      <Input
+                                        className="h-9"
+                                        {...register("paypalEmail")}
+                                        placeholder="namn@example.com"
+                                        type="email"
+                                      />
+                                      {showErrors && errors.paypalEmail && (
+                                        <p className="text-xs text-destructive">{errors.paypalEmail.message}</p>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      PayPal-avgift: {paypalFeeSek.toLocaleString("sv-SE")} kr. Du får utbetalt{" "}
+                                      {paypalNetSek.toLocaleString("sv-SE")} kr efter avgift.
+                                    </p>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -669,6 +781,18 @@ const CheckoutContent = ({
                       <span className="text-muted-foreground">Estimerat belopp</span>
                       <span className="font-bold text-primary">{estimatedPrice}</span>
                     </div>
+                    {watch("paymentMethod") === "paypal" && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">PayPal-avgift</span>
+                          <span className="font-semibold">-{paypalFeeSek.toLocaleString("sv-SE")} kr</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Efter avgift</span>
+                          <span className="font-bold text-primary">{paypalNetSek.toLocaleString("sv-SE")} kr</span>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="rounded-lg border border-border p-3 space-y-0.5 text-sm">
@@ -746,8 +870,9 @@ const CheckoutContent = ({
                 ) : (
                   <Button
                     type="button"
-                    className="flex-1"
+                    className="cmp-checkout-submit flex-1"
                     disabled={isSubmitting}
+                    data-loading={isSubmitting ? "true" : undefined}
                     onClick={async () => {
                       if (!watch("findMyIphoneDisabled")) {
                         toast.error("Bekräfta att Hitta min iPhone är avaktiverad");
@@ -760,14 +885,7 @@ const CheckoutContent = ({
                       await submitOrder(getValues());
                     }}
                   >
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Skickar...
-                      </>
-                    ) : (
-                      "Slutför beställning"
-                    )}
+                    <span>Slutför beställning</span>
                   </Button>
                 )}
               </div>

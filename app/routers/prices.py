@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Header, Background
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel
 from ..database import get_db
 from ..models import BuybackPrice, PriceOut, BestOffer, ScrapeStatusOut
@@ -91,6 +91,22 @@ async def get_models(db: AsyncSession = Depends(get_db)):
         .order_by(BuybackPrice.model)
     )
     return [row[0] for row in result.all()]
+
+
+@router.get("/models/storage-options", response_model=Dict[str, List[int]], summary="Lista lagringsalternativ per modell")
+async def get_model_storage_options(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(BuybackPrice.model, BuybackPrice.storage_gb)
+        .where(BuybackPrice.is_active == True, BuybackPrice.storage_gb.is_not(None))
+        .distinct()
+        .order_by(BuybackPrice.model, BuybackPrice.storage_gb)
+    )
+
+    options: Dict[str, List[int]] = {}
+    for model, storage_gb in result.all():
+        options.setdefault(model, []).append(storage_gb)
+
+    return options
 
 
 @router.get("/retailers", response_model=List[str], summary="Lista aktiva återförsäljare")
@@ -259,12 +275,11 @@ async def import_prices(
     if x_api_key != settings.scrape_api_key:
         raise HTTPException(status_code=401, detail="Ogiltig API-nyckel")
 
-    from sqlalchemy import update
-    # Markera gamla priser som inaktiva
+    from sqlalchemy import delete
+    # Ersätt återförsäljarens gamla prislista. API:t läser bara senaste priser.
     await db.execute(
-        update(BuybackPrice)
+        delete(BuybackPrice)
         .where(func.lower(BuybackPrice.retailer) == retailer.lower())
-        .values(is_active=False)
     )
 
     # Infoga nya priser

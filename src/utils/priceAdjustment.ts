@@ -1,5 +1,6 @@
 import { ConditionAnswers, ScreenGlass, WearLevel, WearLevelWithCrack } from "@/types/condition";
-import { CompanyOffer, getBasePrice } from "@/data/mockData";
+import { getReferenceBasePrice } from "@/data/iphoneCatalog";
+import { CompanyOffer } from "@/types/offers";
 
 // =====================================================
 // Helpers
@@ -257,7 +258,7 @@ export const computeTelestore = (model: string, storage: string, a: ConditionAns
   }
 
   multiplier = Math.max(0.05, multiplier);
-  const price = Math.round(getBasePrice(model, storage) * 0.92 * multiplier);
+  const price = Math.round(getReferenceBasePrice(model, storage) * 0.92 * multiplier);
 
   return { notPurchased: false, price: Math.max(60, price), conditionKey: key };
 };
@@ -268,7 +269,7 @@ export const computeTelestore = (model: string, storage: string, a: ConditionAns
 
 export const computeOffers = (model: string, storage: string, a: ConditionAnswers): CompanyOffer[] => {
   const today = new Date().toLocaleDateString("sv-SE");
-  const base = getBasePrice(model, storage);
+  const base = getReferenceBasePrice(model, storage);
   const generalFactor = computeGeneralFactor(a);
 
   const offers: CompanyOffer[] = generalDealers.map((d) => {

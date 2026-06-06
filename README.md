@@ -66,17 +66,23 @@ Kontaktformuläret är förberett för Supabase Edge Functions, men mejlutskick 
 1. Skapa nytt Railway-projekt och koppla till detta repo
 2. Lägg till miljövariabler från `.env.example`
 3. Railway använder `Dockerfile` automatiskt
-4. PostgreSQL: Lägg till Railway Postgres-plugin och sätt `DATABASE_URL`
+4. Lägg till en Railway Volume monterad på `/app/data`
+5. Använd SQLite på volymen i stället för Railway Postgres
 
 ```bash
 # Sätt miljövariabler i Railway
 SCRAPE_API_KEY=din-hemliga-nyckel
-DATABASE_URL=postgresql+asyncpg://...  # från Railway Postgres
+DATABASE_URL=sqlite+aiosqlite:////app/data/cashmyphone.db
 SCRAPE_CRON_HOURS=0,4,8,12,16,20
 SCRAPE_TIMEZONE=Europe/Stockholm
 PLAYWRIGHT_HEADLESS=true
 ALLOWED_ORIGINS=https://cashmyphone.se
 ```
+
+Railway Postgres behövs inte för nuvarande prisdataflöde. API:t läser bara den
+senaste aktiva prislistan, och varje lyckad scraping ersätter återförsäljarens
+gamla prisrader. Det gör en liten SQLite-databas på persistent volume till ett
+billigare alternativ än en 24/7 Postgres-container.
 
 ## Exempelfrågor
 

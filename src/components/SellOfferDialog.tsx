@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import CheckoutContent from "@/components/CheckoutContent";
-import { CompanyOffer } from "@/data/mockData";
+import { CompanyOffer } from "@/types/offers";
 import { ConditionAnswers } from "@/types/condition";
 
 interface SellOfferDialogProps {
@@ -20,6 +20,9 @@ const getDealerId = (companyName: string): string => {
   if (name.includes("happyphone") || name.includes("happy phone")) return "happyphone";
   if (name.includes("telestore")) return "telestore";
   if (name.includes("renewed")) return "renewed";
+  if (name.includes("phonehero") || name.includes("phone hero")) return "phonehero";
+  if (name.includes("fixiphone") || name.includes("fix iphone")) return "fixiphone";
+  if (name.includes("fixtech") || name.includes("fix tech") || name.includes("fixphonepro")) return "fixphonepro";
   if (name.includes("cleverbuy") || name.includes("clever buy")) return "cleverbuy";
   return "swappie";
 };
