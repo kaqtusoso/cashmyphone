@@ -1,7 +1,7 @@
 import { useParams, Navigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import UnifiedFlow from "@/components/UnifiedFlow";
-import { iphoneModels } from "@/data/mockData";
+import { iphoneModels } from "@/data/iphoneCatalog";
 import { modelToSlug } from "@/utils/modelSlug";
 
 const SellPhone = () => {
