@@ -1,0 +1,126 @@
+.cmp-site-footer {
+  background: #0f1216;
+  color: #aeb4bd;
+  padding: 56px 0 36px;
+}
+
+.cmp-site-footer-wrap {
+  width: min(100% - 48px, 1120px);
+  margin: 0 auto;
+}
+
+.cmp-site-footer-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 30px;
+}
+
+.cmp-site-footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: #fff;
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.cmp-site-footer-brand img {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.cmp-site-footer p {
+  max-width: 38ch;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.cmp-site-footer h3 {
+  margin: 0 0 14px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cmp-site-footer nav a {
+  display: block;
+  color: #aeb4bd;
+  font-size: 14px;
+  padding: 5px 0;
+  transition: color 0.15s;
+}
+
+.cmp-site-footer nav a:hover {
+  color: #fff;
+}
+
+.cmp-site-footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 42px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: #7c828c;
+  font-size: 13px;
+  padding-top: 24px;
+}
+
+.cmp-site-footer-mobile {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .cmp-site-footer-desktop {
+    display: none;
+  }
+
+  .cmp-site-footer-mobile {
+    display: block;
+    background: #0f1216;
+    padding: 32px 18px 24px;
+  }
+
+  .cmp-site-footer-mobile > div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .cmp-site-footer-mobile img {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+  }
+
+  .cmp-site-footer-mobile strong {
+    color: #fff;
+    font-family: "DM Sans", system-ui, sans-serif;
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .cmp-site-footer-mobile p {
+    max-width: 34ch;
+    margin: 0 0 22px;
+    color: #8b93a0;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .cmp-site-footer-mobile small {
+    display: block;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    color: #7c828c;
+    font-size: 12px;
+    padding-top: 16px;
+  }
+}

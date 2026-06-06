@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Check, ChevronLeft, Info, Loader2, Search, Shield, Star, Truck, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
+import DesktopCommerceFlow from "@/components/DesktopCommerceFlow";
+import MobileCommerceFlow from "@/components/MobileCommerceFlow";
 import ComparisonTable from "@/components/ComparisonTable";
 import SellOfferDialog from "@/components/SellOfferDialog";
 import {
@@ -12,10 +14,11 @@ import {
   WearLevelWithCrack,
   initialConditionAnswers,
 } from "@/types/condition";
-import { CompanyOffer, iphoneModels, storageByModel } from "@/data/mockData";
+import type { CompanyOffer } from "@/types/offers";
 import { fetchQuotes } from "@/utils/apiQuote";
-import { getIphoneImage } from "@/utils/iphoneImage";
+import { getDefaultIphoneColor, getIphoneColorOptions, getIphoneImage, type IphoneColorOption } from "@/utils/iphoneImage";
 import { modelToSlug } from "@/utils/modelSlug";
+import { useIphoneCatalog } from "@/hooks/useIphoneCatalog";
 import { useSavedOffers } from "@/hooks/useSavedOffers";
 import type { SavedOffer } from "@/types/savedOffers";
 
@@ -39,7 +42,7 @@ interface RestoreLocationState {
   restoreFromSavedOffer?: SavedOffer;
 }
 
-type StepKey = "model" | "storage" | "battery" | "function" | "glass" | "wear" | "sides" | "back" | "results";
+type StepKey = "model" | "color" | "storage" | "battery" | "function" | "glass" | "wear" | "sides" | "back" | "results";
 
 type Option<T extends string> = {
   value: T;
@@ -48,6 +51,7 @@ type Option<T extends string> = {
 };
 
 const FLOW_STEPS: Exclude<StepKey, "model" | "results">[] = [
+  "color",
   "storage",
   "battery",
   "function",
@@ -58,6 +62,7 @@ const FLOW_STEPS: Exclude<StepKey, "model" | "results">[] = [
 ];
 
 const STEP_LABELS: Record<Exclude<StepKey, "model" | "results">, string> = {
+  color: "Färg",
   storage: "Lagring",
   battery: "Batteri",
   function: "Funktionskoll",
@@ -248,27 +253,31 @@ const InfoBox = ({ children }: { children: React.ReactNode }) => (
 const Progress = ({ step }: { step: Exclude<StepKey, "model" | "results"> }) => (
   <div className="claude-progress">
     <div>
-      <span style={{ width: `${((stepIndex(step) + 0.5) / FLOW_STEPS.length) * 100}%` }} />
+      <span style={{ width: `${((stepIndex(step) + 1) / FLOW_STEPS.length) * 100}%` }} />
     </div>
-    <strong>{stepIndex(step) + 1}/7</strong>
+    <strong>{stepIndex(step) + 1}/{FLOW_STEPS.length}</strong>
   </div>
 );
 
 const DevicePanel = ({
   model,
+  color,
   storage,
   answers,
   step,
 }: {
   model: string;
+  color: string;
   storage: string;
   answers: ConditionAnswers;
   step: Exclude<StepKey, "model" | "results">;
 }) => {
-  const phoneImage = getIphoneImage(model);
+  const phoneImage = getIphoneImage(model, color);
+  const selectedColor = getIphoneColorOptions(model).find((option) => option.value === color);
   const rows = [
+    { key: "color", label: "Färg", value: selectedColor?.label ?? "-" },
     { key: "storage", label: "Lagring", value: storage ? formatStorage(storage) : "-" },
-    { key: "battery", label: "Batteri", value: answers.batteryHealth === null ? "-" : `${answers.batteryHealth} %` },
+    { key: "battery", label: "Batteri", value: answers.batteryHealth === null ? "-" : `${answers.batteryHealth}%` },
     {
       key: "function",
       label: "Funktionskoll",
@@ -308,17 +317,29 @@ const DevicePanel = ({
   );
 };
 
-const MobileStepHeader = ({ model, step, onBack }: { model: string; step: Exclude<StepKey, "model" | "results">; onBack: () => void }) => (
+const MobileStepHeader = ({
+  model,
+  color,
+  step,
+  onBack,
+}: {
+  model: string;
+  color: string;
+  step: Exclude<StepKey, "model" | "results">;
+  onBack: () => void;
+}) => (
   <div className="claude-mobile-step-head">
     <button type="button" onClick={onBack} aria-label="Tillbaka">
       <ChevronLeft aria-hidden />
     </button>
-    <div className="claude-mobile-phone" aria-hidden />
+    <div className="claude-mobile-phone">
+      <img src={getIphoneImage(model, color)} alt="" />
+    </div>
     <div>
       <span>Du värderar</span>
       <strong>{model}</strong>
     </div>
-    <em>{stepIndex(step) + 1}/7</em>
+    <em>{stepIndex(step) + 1}/{FLOW_STEPS.length}</em>
   </div>
 );
 
@@ -380,13 +401,15 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   const location = useLocation();
   const { addSavedOffer } = useSavedOffers();
 
-  const [step, setStep] = useState<StepKey>(initialModel ? "storage" : "model");
+  const [step, setStep] = useState<StepKey>(initialModel ? "color" : "model");
   const [model, setModel] = useState(initialModel ?? "");
+  const [color, setColor] = useState("");
   const [storage, setStorage] = useState("");
   const [answers, setAnswers] = useState<ConditionAnswers>(defaultAnswers);
-  const [batteryMode, setBatteryMode] = useState<"input" | "cant">("input");
+  const [batteryMode, setBatteryMode] = useState<"input" | "cant" | null>(null);
   const [funcIndex, setFuncIndex] = useState(0);
   const [results, setResults] = useState<CompanyOffer[] | null>(null);
+  const [submittedAnswers, setSubmittedAnswers] = useState<ConditionAnswers | null>(null);
   const [resultsTimestamp, setResultsTimestamp] = useState("");
   const [loadingResults, setLoadingResults] = useState(false);
   const [search, setSearch] = useState("");
@@ -394,14 +417,18 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   const [selectedOffer, setSelectedOffer] = useState<CompanyOffer | null>(null);
   const [sellDialogOpen, setSellDialogOpen] = useState(false);
   const [savedOfferId, setSavedOfferId] = useState<string | undefined>();
+  const flowRootRef = useRef<HTMLDivElement>(null);
+  const functionCardRef = useRef<HTMLDivElement>(null);
+  const { models: iphoneModels, storageByModel } = useIphoneCatalog();
 
   const filteredModels = useMemo(() => {
     const normalized = search.trim().toLowerCase();
     if (!normalized) return iphoneModels;
     return iphoneModels.filter((item) => item.toLowerCase().includes(normalized));
-  }, [search]);
+  }, [iphoneModels, search]);
 
   const availableStorage = model ? storageByModel[model] ?? [] : [];
+  const availableColors = useMemo(() => (model ? getIphoneColorOptions(model) : []), [model]);
 
   useEffect(() => {
     const state = location.state as RestoreLocationState | null;
@@ -409,8 +436,10 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
 
     const saved = state.restoreFromSavedOffer;
     setModel(saved.model);
+    setColor("");
     setStorage(saved.storage);
     setAnswers(saved.condition ?? defaultAnswers);
+    setSubmittedAnswers(saved.condition ?? null);
     if (saved.offers?.length) {
       setResults(saved.offers);
       setStep("results");
@@ -419,17 +448,50 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
     }
   }, [location.state, onModelSelected, onShowResults]);
 
+  const scrollToFlowTop = () => {
+    const scroll = () => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      document.scrollingElement?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      flowRootRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+    };
+
+    scroll();
+    requestAnimationFrame(scroll);
+    setTimeout(scroll, 60);
+    setTimeout(scroll, 180);
+  };
+
+  const scrollToFunctionQuestion = () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        functionCardRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+      });
+    });
+  };
+
   const go = (next: StepKey) => {
     setStep(next);
     onShowResults?.(next === "results");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToFlowTop();
   };
+
+  useEffect(() => {
+    if (step === "function") return;
+    if (step === "model") return;
+    scrollToFlowTop();
+  }, [step]);
 
   const selectModel = (selectedModel: string) => {
     setModel(selectedModel);
     setSearch(selectedModel);
+    setColor("");
     setStorage("");
     setAnswers(defaultAnswers);
+    setSubmittedAnswers(null);
+    setBatteryMode(null);
     setFuncIndex(0);
     setSearchOpen(false);
     onModelSelected?.(true);
@@ -439,9 +501,12 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   const reset = () => {
     setStep("model");
     setModel("");
+    setColor("");
     setStorage("");
     setSearch("");
     setAnswers(defaultAnswers);
+    setSubmittedAnswers(null);
+    setBatteryMode(null);
     setResults(null);
     setFuncIndex(0);
     onShowResults?.(false);
@@ -450,12 +515,13 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   };
 
   const goBack = () => {
-    if (step === "storage") {
+    if (step === "color") {
       reset();
       return;
     }
     if (step === "function" && funcIndex > 0 && funcIndex < functionalQuestions.length) {
       setFuncIndex((current) => current - 1);
+      scrollToFunctionQuestion();
       return;
     }
     if (step === "results") {
@@ -475,7 +541,13 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
 
     const next = functionalQuestions.findIndex((candidate, index) => index > funcIndex && nextFunctional[candidate.key] === null);
     const fallback = functionalQuestions.findIndex((candidate) => nextFunctional[candidate.key] === null);
-    setFuncIndex(next >= 0 ? next : fallback >= 0 ? fallback : functionalQuestions.length);
+    const nextIndex = next >= 0 ? next : fallback >= 0 ? fallback : functionalQuestions.length;
+    setFuncIndex(nextIndex);
+    if (nextIndex < functionalQuestions.length) {
+      scrollToFunctionQuestion();
+    } else {
+      scrollToFlowTop();
+    }
   };
 
   const computeAndShow = async () => {
@@ -495,6 +567,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
       await new Promise((resolve) => setTimeout(resolve, 800));
       const offers = await fetchQuotes(model, storage, quoteAnswers);
       setResults(offers);
+      setSubmittedAnswers(quoteAnswers);
       setResultsTimestamp(
         new Date().toLocaleString("sv-SE", {
           year: "numeric",
@@ -586,21 +659,48 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   );
 
   const renderStepContent = (currentStep: Exclude<StepKey, "model" | "results">) => {
+    if (currentStep === "color") {
+      return (
+        <>
+          <h1>Vilken färg har den?</h1>
+          <InfoBox>Välj färgen på din {model}.</InfoBox>
+          <div className="claude-color-grid">
+            {availableColors.map((option: IphoneColorOption) => {
+              const selected = color === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={selected ? "selected" : ""}
+                  onClick={() => setColor(option.value)}
+                >
+                  <span className="claude-color-phone">
+                    <img src={option.image} alt="" />
+                  </span>
+                  <span className="claude-color-meta">
+                    <strong>{option.label}</strong>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <Foot onBack={goBack} onNext={() => go("storage")} disabled={!color} />
+        </>
+      );
+    }
+
     if (currentStep === "storage") {
       return (
         <>
           <h1>Hur mycket lagring?</h1>
-          <p className="claude-sub">Inställningar → Allmänt → Om → Kapacitet</p>
+          <InfoBox>Inställningar → Allmänt → Om → Kapacitet</InfoBox>
           <div className="claude-radio-list">
             {availableStorage.map((item) => (
               <button
                 key={item}
                 type="button"
                 className={storage === item ? "selected" : ""}
-                onClick={() => {
-                  setStorage(item);
-                  go("battery");
-                }}
+                onClick={() => setStorage(item)}
               >
                 <span aria-hidden />
                 <strong>{formatStorage(item)}</strong>
@@ -617,7 +717,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
       return (
         <>
           <h1>Vad är batterihälsan?</h1>
-          <p className="claude-sub">Inställningar → Batteri → Batterihälsa → Maximal kapacitet</p>
+          <InfoBox>Inställningar → Batteri → Batterihälsa → Maximal kapacitet</InfoBox>
           <button type="button" className={batteryMode === "input" ? "claude-battery selected" : "claude-battery"} onClick={() => setBatteryMode("input")}>
             <span aria-hidden />
             <strong>Ange batterikapacitet</strong>
@@ -625,9 +725,11 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
               <input
                 value={answers.batteryHealth ?? ""}
                 type="number"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 min={1}
                 max={100}
-                placeholder="87"
+                placeholder="Använd siffror (t.ex. 89)"
                 onChange={(event) => {
                   setBatteryMode("input");
                   const value = event.target.value;
@@ -647,7 +749,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
             className={batteryMode === "cant" ? "claude-battery compact selected" : "claude-battery compact"}
             onClick={() => {
               setBatteryMode("cant");
-              setAnswers((current) => ({ ...current, batteryHealth: 100 }));
+              setAnswers((current) => ({ ...current, batteryHealth: null }));
             }}
           >
             <span aria-hidden />
@@ -674,13 +776,16 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
                 <div key={question.key}>
                   <span><Check aria-hidden /></span>
                   <strong>{question.label}</strong>
-                  <button type="button" onClick={() => setFuncIndex(index)}>Redigera</button>
+                  <button type="button" onClick={() => {
+                    setFuncIndex(index);
+                    scrollToFunctionQuestion();
+                  }}>Redigera</button>
                 </div>
               );
             })}
           </div>
           {active ? (
-            <div className="claude-function-card">
+            <div className="claude-function-card" ref={functionCardRef}>
               <p>{funcIndex + 1}/{functionalQuestions.length} · Funktionskoll</p>
               <h2>{active.title}</h2>
               <InfoBox>{active.hint}</InfoBox>
@@ -757,12 +862,11 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
     if (!isFlowStep(step)) return null;
 
     return (
-      <div className="claude-page claude-assessment">
-        <Nav onSell={() => go("storage")} />
+      <div className="claude-page claude-assessment" ref={flowRootRef}>
         <div className="claude-mobile-only">
-          <MobileStepHeader model={model} step={step} onBack={goBack} />
+          <MobileStepHeader model={model} color={color} step={step} onBack={goBack} />
           <div className="claude-mobile-progress">
-            <span>Steg {stepIndex(step) + 1} av 7</span>
+            <span>Steg {stepIndex(step) + 1} av {FLOW_STEPS.length}</span>
             <em>{STEP_LABELS[step]}</em>
             <div><i style={{ width: `${((stepIndex(step) + 0.5) / FLOW_STEPS.length) * 100}%` }} /></div>
           </div>
@@ -770,9 +874,9 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
         </div>
 
         <div className="claude-desktop-flow">
-          <DevicePanel model={model} storage={storage} answers={answers} step={step} />
+          <Progress step={step} />
+          <DevicePanel model={model} color={color} storage={storage} answers={answers} step={step} />
           <main>
-            <Progress step={step} />
             <div className="claude-step-card">{renderStepContent(step)}</div>
           </main>
         </div>
@@ -782,44 +886,30 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
 
   const renderResults = () => {
     if (!results) return null;
-    const sorted = [...results].filter((offer) => !offer.notPurchased).sort((a, b) => b.pris - a.pris);
-    const best = sorted[0];
 
     return (
-      <div className="claude-page claude-results-page">
-        <Nav onSell={() => go("storage")} />
-        <main className="claude-results-shell">
-          <button type="button" className="claude-back-link" onClick={() => go("back")}>← Tillbaka</button>
-          <p>Du värderade <strong>{model} · {formatStorage(storage)}</strong></p>
-          <h1>
-            Vi hittade ditt <span>bästa bud<Squiggle /></span>
-          </h1>
-          {best && (
-            <section className="claude-best-offer">
-              <div>
-                <p className="claude-hand">bästa valet ↓</p>
-                <h2>{best.företag}</h2>
-                <span><Star aria-hidden /> Trustpilot {best.trustpilotScore ?? "-"}</span>
-              </div>
-              <div>
-                <small>Du får</small>
-                <strong>{best.pris.toLocaleString("sv-SE")}<em> kr</em><Squiggle /></strong>
-                <button type="button" onClick={() => handleSelectOffer(best)}>Sälj till {best.företag} →</button>
-              </div>
-            </section>
-          )}
-          <ComparisonTable offers={results} onSelectOffer={handleSelectOffer} />
-          {resultsTimestamp && <p className="claude-updated">Priser hämtade: {resultsTimestamp}</p>}
-        </main>
-        <SellOfferDialog
-          open={sellDialogOpen}
-          onOpenChange={setSellDialogOpen}
-          offer={selectedOffer}
-          model={model}
-          storage={storage}
-          conditionAnswers={answers}
-          savedOfferId={savedOfferId}
-        />
+      <div className="claude-page claude-results-page" ref={flowRootRef}>
+        <div className="cmp-commerce-desktop-only">
+          <DesktopCommerceFlow
+            offers={results}
+            model={model}
+            storage={formatStorage(storage)}
+            color={color}
+            conditionAnswers={(submittedAnswers ?? answers) as unknown as Record<string, unknown>}
+            updated={resultsTimestamp}
+            onBack={() => go("back")}
+          />
+        </div>
+        <div className="cmp-commerce-mobile-only">
+          <MobileCommerceFlow
+            offers={results}
+            model={model}
+            storage={formatStorage(storage)}
+            color={color}
+            conditionAnswers={(submittedAnswers ?? answers) as unknown as Record<string, unknown>}
+            onBack={() => go("back")}
+          />
+        </div>
       </div>
     );
   };

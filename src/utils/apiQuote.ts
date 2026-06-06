@@ -5,9 +5,8 @@
  * CompanyOffer[] som resten av appen förväntar sig.
  */
 import { ConditionAnswers, WearLevel, WearLevelWithCrack, ScreenGlass } from "@/types/condition";
-import { CompanyOffer } from "@/data/mockData";
-
-const API_URL = import.meta.env.VITE_API_URL ?? "https://cashmyphone-production.up.railway.app";
+import { CompanyOffer } from "@/types/offers";
+import { API_URL } from "@/utils/apiClient";
 
 // ─── Displayinfo per återförsäljare ──────────────────────────────────────────
 
@@ -20,6 +19,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: string;
     trustpilotReviews: string;
     trustpilotUrl: string;
+    paymentMethods: string[];
   }
 > = {
   swappie: {
@@ -29,6 +29,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "4.4",
     trustpilotReviews: "65 045",
     trustpilotUrl: "https://se.trustpilot.com/review/swappie.com",
+    paymentMethods: ["PayPal", "Banköverföring"],
   },
   phonehero: {
     name: "PhoneHero",
@@ -37,6 +38,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "4.7",
     trustpilotReviews: "13 815",
     trustpilotUrl: "https://se.trustpilot.com/review/phonehero.se",
+    paymentMethods: ["Swish", "Banköverföring"],
   },
   telestore: {
     name: "Telestore",
@@ -45,6 +47,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "4.7",
     trustpilotReviews: "1 753",
     trustpilotUrl: "https://se.trustpilot.com/review/telestore.se",
+    paymentMethods: ["Swish", "Banköverföring"],
   },
   fixmyphone: {
     name: "FixMyPhone",
@@ -53,6 +56,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "3.1",
     trustpilotReviews: "1 385",
     trustpilotUrl: "https://se.trustpilot.com/review/fixmyphone.se",
+    paymentMethods: ["Swish", "Banköverföring"],
   },
   happyphone: {
     name: "HappyPhone",
@@ -61,6 +65,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "2.2",
     trustpilotReviews: "42",
     trustpilotUrl: "https://se.trustpilot.com/review/happyphone.se",
+    paymentMethods: ["Swish", "Banköverföring"],
   },
   renewed: {
     name: "ReNewed",
@@ -69,6 +74,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "4.1",
     trustpilotReviews: "32",
     trustpilotUrl: "https://se.trustpilot.com/review/renewed.se",
+    paymentMethods: ["Banköverföring"],
   },
   fixiphone: {
     name: "FixiPhone",
@@ -77,6 +83,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "3.9",
     trustpilotReviews: "168",
     trustpilotUrl: "https://se.trustpilot.com/review/fixiphone.se",
+    paymentMethods: ["Swish", "Banköverföring"],
   },
   fixphonepro: {
     name: "FixTech",
@@ -85,6 +92,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "4.0",
     trustpilotReviews: "3",
     trustpilotUrl: "https://se.trustpilot.com/review/fixtech.se",
+    paymentMethods: ["Swish", "Banköverföring"],
   },
 };
 
@@ -223,6 +231,7 @@ export const fetchQuotes = async (
       trustpilotScore: "",
       trustpilotReviews: "",
       trustpilotUrl: "",
+      paymentMethods: ["Banköverföring"],
     };
 
     return {
@@ -239,6 +248,7 @@ export const fetchQuotes = async (
       trustpilotScore: info.trustpilotScore,
       trustpilotReviews: info.trustpilotReviews,
       trustpilotUrl: info.trustpilotUrl,
+      paymentMethods: info.paymentMethods,
     } satisfies CompanyOffer;
   });
 };

@@ -1,6 +1,6 @@
 import { Package, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { CompanyOffer } from "@/data/mockData";
+import { CompanyOffer } from "@/types/offers";
 import trustpilotLogo from "@/assets/trustpilot-logo.png";
 
 interface ComparisonTableProps {

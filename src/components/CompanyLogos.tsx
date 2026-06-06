@@ -1,15 +1,22 @@
 import telestoreLogo from "@/assets/telestore-logo.png";
 import swappieLogo from "@/assets/swappie-logo.png";
+import phoneheroLogo from "@/assets/phonehero-logo.svg";
 import fixmyphoneLogo from "@/assets/fixmyphone-logo.png";
 import renewedLogo from "@/assets/renewed-logo.png";
 import happyphoneLogo from "@/assets/happyphone-logo.png";
+import fixiphoneLogo from "@/assets/fixiphone-logo.png";
+import fixphoneproLogo from "@/assets/fixphonepro-logo.png";
 
 const CompanyLogos = () => {
   const companies = [
     { name: "FixMyPhone", logo: fixmyphoneLogo },
     { name: "Swappie", logo: swappieLogo },
+    { name: "PhoneHero", logo: phoneheroLogo },
     { name: "Telestore", logo: telestoreLogo },
+    { name: "reNewed", logo: renewedLogo },
     { name: "HappyPhone", logo: happyphoneLogo },
+    { name: "Fixiphone", logo: fixiphoneLogo },
+    { name: "FixPhonePro", logo: fixphoneproLogo },
   ];
 
   // Duplicera loggorna många gånger för 5-minuters sömlös loop

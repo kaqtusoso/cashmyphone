@@ -1,7 +1,7 @@
 import json
 import logging
 import smtplib
-from asyncio import to_thread
+from asyncio import create_task, gather, to_thread
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -64,6 +64,7 @@ class OrderPayment(BaseModel):
 
 
 class OrderCreate(BaseModel):
+    client_order_id: str | None = None
     model: str = Field(min_length=1)
     storage: str = Field(min_length=1)
     dealer_id: str = Field(min_length=1)
@@ -95,7 +96,7 @@ class OrderCreateResponse(BaseModel):
 
 def _make_order(payload: OrderCreate) -> OrderOut:
     created_at = datetime.now(timezone.utc).isoformat()
-    order_id = f"CMP-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:8].upper()}"
+    order_id = payload.client_order_id or f"CMP-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:8].upper()}"
     return OrderOut(order_id=order_id, created_at=created_at, **payload.model_dump())
 
 
@@ -537,6 +538,13 @@ async def _send_to_google_sheet(order: OrderOut) -> IntegrationStatus:
     return await _send_to_google_sheet_webhook(order)
 
 
+def _google_sheet_is_configured() -> bool:
+    return bool(
+        (settings.google_service_account_json and settings.google_sheets_spreadsheet_id)
+        or settings.google_sheets_webhook_url
+    )
+
+
 @router.post("/orders/sheets/layout", response_model=IntegrationStatus)
 async def refresh_order_sheet_layout(x_api_key: str = Header(..., alias="X-API-Key")):
     if x_api_key != settings.scrape_api_key:
@@ -649,11 +657,40 @@ async def _send_confirmation_email(order: OrderOut) -> IntegrationStatus:
         return IntegrationStatus(configured=True, ok=False, message=str(exc))
 
 
+def _confirmation_email_is_configured() -> bool:
+    from_email = settings.smtp_from_email or settings.order_email_from
+    return bool(settings.smtp_host and settings.smtp_username and settings.smtp_password and from_email)
+
+
 @router.post("/orders", response_model=OrderCreateResponse)
 async def create_order(payload: OrderCreate):
     order = _make_order(payload)
-    sheets_status = await _send_to_google_sheet(order)
-    email_status = await _send_confirmation_email(order)
+
+    async def _send_order_integrations() -> None:
+        try:
+            sheets_status, email_status = await gather(
+                _send_to_google_sheet(order),
+                _send_confirmation_email(order),
+            )
+            if not sheets_status.ok:
+                logger.warning("Order %s registrerad men Google Sheets misslyckades: %s", order.order_id, sheets_status.message)
+            if not email_status.ok:
+                logger.warning("Order %s registrerad men bekräftelsemail misslyckades: %s", order.order_id, email_status.message)
+        except Exception:
+            logger.exception("Order %s registrerad men integrationsjobbet kraschade", order.order_id)
+
+    create_task(_send_order_integrations())
+
+    sheets_status = IntegrationStatus(
+        configured=_google_sheet_is_configured(),
+        ok=True,
+        message="Ordern är registrerad. Google Sheets körs i bakgrunden.",
+    )
+    email_status = IntegrationStatus(
+        configured=_confirmation_email_is_configured(),
+        ok=True,
+        message="Ordern är registrerad. Bekräftelsemail körs i bakgrunden.",
+    )
 
     return OrderCreateResponse(
         order=order,

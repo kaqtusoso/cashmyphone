@@ -1,6 +1,7 @@
 import { Helmet } from "react-helmet-async";
 
-import UnifiedFlow from "@/components/UnifiedFlow";
+import DesktopHome from "@/components/DesktopHome";
+import MobileHome from "@/components/MobileHome";
 
 const HOME_JSON_LD = {
   "@context": "https://schema.org",
@@ -29,7 +30,12 @@ const Index = () => {
       </Helmet>
 
       <main>
-        <UnifiedFlow />
+        <div className="cmp-desktop-home-only">
+          <DesktopHome />
+        </div>
+        <div className="cmp-mobile-home-only">
+          <MobileHome />
+        </div>
       </main>
     </div>
   );

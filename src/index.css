@@ -768,6 +768,25 @@
   animation: cmp-spin 0.75s linear infinite;
 }
 
+.cmp-checkout-submit[data-loading="true"] {
+  position: relative;
+}
+
+.cmp-checkout-submit[data-loading="true"] span {
+  opacity: 0;
+}
+
+.cmp-checkout-submit[data-loading="true"]::after {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  content: "";
+  animation: cmp-spin 0.75s linear infinite;
+}
+
 .cmp-results {
   width: min(100%, 68rem);
   margin: 0 auto;
@@ -1361,6 +1380,10 @@
   background: var(--bg);
 }
 
+.claude-assessment > .claude-nav {
+  display: none;
+}
+
 .claude-desktop-flow {
   display: none;
 }
@@ -1388,11 +1411,22 @@
 }
 
 .claude-mobile-phone {
-  width: 1.85rem;
-  height: 2.4rem;
-  border: 1.5px solid rgba(255,255,255,.35);
-  border-radius: 0.45rem;
-  background: rgba(255,255,255,.14);
+  position: relative;
+  overflow: hidden;
+  width: 2.3rem;
+  height: 2.7rem;
+  flex: none;
+  border: 1.5px solid rgba(255,255,255,.2);
+  border-radius: 0.55rem;
+  background: rgba(255,255,255,.16);
+}
+
+.claude-mobile-phone img {
+  position: absolute;
+  inset: 0.2rem;
+  width: calc(100% - 0.4rem);
+  height: calc(100% - 0.4rem);
+  object-fit: contain;
 }
 
 .claude-mobile-step-head div:nth-child(3) {
@@ -1588,6 +1622,71 @@
   margin-top: 1.25rem;
 }
 
+.claude-color-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.claude-color-grid button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1.5px solid var(--line);
+  border-radius: 0.95rem;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 4.35rem;
+  padding: 0.7rem 1rem;
+  text-align: left;
+  transition: border-color 0.14s, background 0.14s, box-shadow 0.14s;
+}
+
+.claude-color-grid button:hover,
+.claude-color-grid button.selected {
+  border-color: var(--green-deep);
+}
+
+.claude-color-grid button.selected {
+  background: #eefaf4;
+  box-shadow: inset 0 0 0 1px rgba(0, 147, 106, 0.12);
+}
+
+.claude-color-phone {
+  position: relative;
+  overflow: hidden;
+  width: 3.2rem;
+  height: 3.2rem;
+  flex: 0 0 auto;
+  border-radius: 0.75rem;
+  background: var(--green-wash);
+}
+
+.claude-color-phone img {
+  position: absolute;
+  inset: 0.3rem;
+  width: calc(100% - 0.6rem);
+  height: calc(100% - 0.6rem);
+  object-fit: contain;
+}
+
+.claude-color-meta {
+  display: block;
+  min-width: 0;
+}
+
+.claude-color-meta strong {
+  overflow: hidden;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .claude-radio-list button,
 .claude-battery {
   display: flex;
@@ -1649,6 +1748,8 @@
 .claude-battery {
   display: grid;
   grid-template-columns: auto 1fr;
+  align-items: start;
+  row-gap: 0.65rem;
   margin-top: 1rem;
 }
 
@@ -1661,12 +1762,12 @@
 
 .claude-battery input {
   width: 100%;
-  height: 3.25rem;
+  height: 2.85rem;
   border: 1.5px solid var(--line);
   border-radius: 0.75rem;
-  padding: 0 1rem;
-  font-size: 1.2rem;
-  font-weight: 800;
+  padding: 0 0.9rem;
+  font-size: 1rem;
+  font-weight: 700;
   outline: 0;
 }
 
@@ -1677,6 +1778,11 @@
 .claude-battery small {
   grid-column: 2;
   color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.claude-battery.compact {
+  row-gap: 0.25rem;
 }
 
 .claude-info-box {
@@ -1931,6 +2037,10 @@
 }
 
 @media (min-width: 768px) {
+  .claude-assessment > .claude-nav {
+    display: flex;
+  }
+
   .claude-nav {
     padding: 0 3rem;
   }
@@ -1959,8 +2069,13 @@
 
   .claude-desktop-flow {
     display: grid;
+    grid-template-areas:
+      "progress progress"
+      "device content";
     grid-template-columns: 21rem minmax(0, 42rem);
-    gap: 3rem;
+    grid-template-rows: 0.38rem auto;
+    column-gap: 3rem;
+    row-gap: 3.25rem;
     align-items: start;
     justify-content: center;
     width: min(100%, 72rem);
@@ -1969,7 +2084,34 @@
     padding: 3rem 1.5rem 5rem;
   }
 
+  .claude-desktop-flow > .claude-progress {
+    grid-area: progress;
+    position: relative;
+    display: block;
+    height: 0.38rem;
+    padding-right: 2.5rem;
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  .claude-desktop-flow > .claude-progress div {
+    width: 100%;
+  }
+
+  .claude-desktop-flow > .claude-progress strong {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    line-height: 1;
+  }
+
+  .claude-desktop-flow > main {
+    grid-area: content;
+  }
+
   .claude-device-panel {
+    grid-area: device;
     position: sticky;
     top: 6rem;
   }
