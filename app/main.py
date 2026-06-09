@@ -23,18 +23,18 @@ INDEX_HTML = DIST_DIR / "index.html"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🚀 CashMyPhone API startar...")
+    logger.info("🚀 Televera API startar...")
     await init_db()
     setup_scheduler()
     asyncio.create_task(scrape_if_prices_empty())
     yield
     # Shutdown
     scheduler.shutdown(wait=False)
-    logger.info("👋 CashMyPhone API avslutar")
+    logger.info("👋 Televera API avslutar")
 
 
 app = FastAPI(
-    title="CashMyPhone API",
+    title="Televera API",
     description="Jämför inköpspriser för begagnade iPhones från svenska återförsäljare",
     version="1.0.0",
     lifespan=lifespan,
@@ -63,7 +63,7 @@ async def root():
         return FileResponse(INDEX_HTML)
 
     return {
-        "name": "CashMyPhone API",
+        "name": "Televera API",
         "docs": "/docs",
         "endpoints": [
             "/api/prices",
@@ -73,6 +73,7 @@ async def root():
             "/api/quote",
             "/api/orders",
             "/api/scrape",
+            "/api/scrape/status",
             "/api/import-prices/{retailer}",
         ],
     }

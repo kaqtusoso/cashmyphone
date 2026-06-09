@@ -1,4 +1,4 @@
-# CashMyPhone API
+# Televera API
 
 FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska återförsäljare.
 
@@ -24,6 +24,7 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 | `GET /api/models` | Lista alla tillgängliga modeller |
 | `GET /api/retailers` | Lista aktiva återförsäljare |
 | `POST /api/quote` | Returnerar bästa bud för ett formulärsvar |
+| `GET /api/scrape/status` | Status, senaste körning och stale-flagga per scraper |
 | `POST /api/scrape` | Trigga manuell scraping (kräver `X-API-Key` header) |
 | `POST /api/import-prices/{retailer}` | Importera lokalt hämtade priser (kräver `X-API-Key` header) |
 | `GET /health` | Healthcheck |
@@ -57,7 +58,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Frontenden använder `VITE_API_URL` för att nå CashMyPhone-backenden. Om variabeln saknas faller den tillbaka till den nuvarande Railway-backenden.
+Frontenden använder `VITE_API_URL` för att nå Televera-backenden. Om variabeln saknas faller den tillbaka till den nuvarande Railway-backenden.
 
 Kontaktformuläret är förberett för Supabase Edge Functions, men mejlutskick är inte aktiverat ännu. Utan `VITE_SUPABASE_URL` och `VITE_SUPABASE_PUBLISHABLE_KEY` laddar sidan ändå, och formuläret visar ett felmeddelande vid försök att skicka.
 
@@ -72,11 +73,12 @@ Kontaktformuläret är förberett för Supabase Edge Functions, men mejlutskick 
 ```bash
 # Sätt miljövariabler i Railway
 SCRAPE_API_KEY=din-hemliga-nyckel
-DATABASE_URL=sqlite+aiosqlite:////app/data/cashmyphone.db
-SCRAPE_CRON_HOURS=0,4,8,12,16,20
+DATABASE_URL=sqlite+aiosqlite:////app/data/televera.db
+SCRAPE_CRON_HOURS=0,6,12,18
 SCRAPE_TIMEZONE=Europe/Stockholm
+SCRAPE_STALE_AFTER_HOURS=8
 PLAYWRIGHT_HEADLESS=true
-ALLOWED_ORIGINS=https://cashmyphone.se
+ALLOWED_ORIGINS=https://televera.se
 ```
 
 Railway Postgres behövs inte för nuvarande prisdataflöde. API:t läser bara den

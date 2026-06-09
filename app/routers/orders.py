@@ -46,7 +46,7 @@ SHEET_HEADER_TO_KEY = {header: key for key, header, _ in SHEET_COLUMNS}
 class OrderCustomer(BaseModel):
     first_name: str = Field(min_length=1)
     last_name: str = Field(min_length=1)
-    personal_number: str = Field(min_length=1)
+    personal_number: str | None = None
     address: str = Field(min_length=1)
     postal_code: str = Field(min_length=1)
     city: str = Field(min_length=1)
@@ -75,7 +75,7 @@ class OrderCreate(BaseModel):
     customer: OrderCustomer
     payment: OrderPayment
     condition_answers: dict[str, Any] | None = None
-    source: Literal["cashmyphone_web"] = "cashmyphone_web"
+    source: Literal["televera_web"] = "televera_web"
 
 
 class IntegrationStatus(BaseModel):
@@ -96,7 +96,7 @@ class OrderCreateResponse(BaseModel):
 
 def _make_order(payload: OrderCreate) -> OrderOut:
     created_at = datetime.now(timezone.utc).isoformat()
-    order_id = payload.client_order_id or f"CMP-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:8].upper()}"
+    order_id = payload.client_order_id or f"TLV-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:8].upper()}"
     return OrderOut(order_id=order_id, created_at=created_at, **payload.model_dump())
 
 
@@ -581,7 +581,7 @@ def _confirmation_html(order: OrderOut) -> str:
     <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.5">
       <h1 style="color:#00B87A">Din beställning är mottagen</h1>
       <p>Hej {customer_name},</p>
-      <p>Tack för din order hos CashMyPhone. Vi har registrerat att du vill sälja:</p>
+      <p>Tack för din order hos Televera. Vi har registrerat att du vill sälja:</p>
       <ul>
         <li><strong>Ordernummer:</strong> {order_id}</li>
         <li><strong>Mobil:</strong> {model} {storage}</li>
@@ -592,7 +592,7 @@ def _confirmation_html(order: OrderOut) -> str:
       </ul>
       <h2>Vad händer nu?</h2>
       <p>Du får fraktinstruktioner och skickar mobilen när du är redo. {dealer_name} kontrollerar mobilen och betalar ut enligt valt betalningssätt.</p>
-      <p>Hälsningar,<br>CashMyPhone</p>
+      <p>Hälsningar,<br>Televera</p>
     </div>
     """
 
@@ -601,7 +601,7 @@ def _confirmation_text(order: OrderOut) -> str:
     price = f"{order.price_sek:,}".replace(",", " ")
     return f"""Hej {order.customer.first_name},
 
-Tack för din order hos CashMyPhone.
+Tack för din order hos Televera.
 
 Ordernummer: {order.order_id}
 Mobil: {order.model} {order.storage}
@@ -614,13 +614,13 @@ Vad händer nu?
 Du får fraktinstruktioner och skickar mobilen när du är redo. {order.dealer_name} kontrollerar mobilen och betalar ut enligt valt betalningssätt.
 
 Hälsningar,
-CashMyPhone
+Televera
 """
 
 
 def _build_confirmation_email(order: OrderOut) -> EmailMessage:
     from_email = settings.smtp_from_email or settings.order_email_from
-    from_name = settings.smtp_from_name or "CashMyPhone"
+    from_name = settings.smtp_from_name or "Televera"
 
     message = EmailMessage()
     message["From"] = formataddr((from_name, from_email))
@@ -629,7 +629,7 @@ def _build_confirmation_email(order: OrderOut) -> EmailMessage:
         message["Bcc"] = settings.order_admin_email
     if settings.smtp_reply_to:
         message["Reply-To"] = settings.smtp_reply_to
-    message["Subject"] = f"Bekräftelse på din CashMyPhone-order {order.order_id}"
+    message["Subject"] = f"Bekräftelse på din Televera-order {order.order_id}"
     message.set_content(_confirmation_text(order))
     message.add_alternative(_confirmation_html(order), subtype="html")
     return message

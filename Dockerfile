@@ -65,7 +65,7 @@ COPY --from=frontend-builder /app/dist ./dist
 
 # Skapa databas-mapp
 RUN mkdir -p /app/data
-ENV DATABASE_URL=sqlite+aiosqlite:////app/data/cashmyphone.db
+ENV DATABASE_URL=sqlite+aiosqlite:////app/data/televera.db
 
 EXPOSE 8000
 
