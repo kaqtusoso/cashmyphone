@@ -3,7 +3,7 @@ from typing import List
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite+aiosqlite:///./data/cashmyphone.db"
+    database_url: str = "sqlite+aiosqlite:///./data/televera.db"
 
     @property
     def async_database_url(self) -> str:
@@ -14,11 +14,12 @@ class Settings(BaseSettings):
                       .replace("postgres://", "postgresql+asyncpg://", 1)
         return url  # SQLite-URL förblir oförändrad
     scrape_api_key: str = "change-me-in-production"
-    scrape_cron_hours: str = "0,4,8,12,16,20"
+    scrape_cron_hours: str = "0,6,12,18"
     scrape_timezone: str = "Europe/Stockholm"
+    scrape_stale_after_hours: int = 8
     request_timeout_seconds: int = 30
     playwright_headless: bool = True
-    allowed_origins: str = "http://localhost:3000,https://cashmyphone.se"
+    allowed_origins: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,https://televera.se"
     environment: str = "development"
     google_sheets_webhook_url: str = ""
     google_service_account_json: str = ""
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_email: str = ""
-    smtp_from_name: str = "CashMyPhone"
+    smtp_from_name: str = "Televera"
     smtp_reply_to: str = ""
     smtp_use_tls: bool = True
     order_submission_timeout_seconds: int = 10
