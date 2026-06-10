@@ -644,14 +644,56 @@ def _send_confirmation_email_sync(order: OrderOut) -> None:
         smtp.send_message(message)
 
 
+def _resend_api_key() -> str:
+    if settings.resend_api_key:
+        return settings.resend_api_key
+    if settings.smtp_host == "smtp.resend.com":
+        return settings.smtp_password
+    return ""
+
+
+async def _send_confirmation_email_resend(order: OrderOut) -> None:
+    from_email = settings.smtp_from_email or settings.order_email_from
+    from_name = settings.smtp_from_name or "Televera"
+    payload: dict[str, Any] = {
+        "from": formataddr((from_name, from_email)),
+        "to": [str(order.customer.email)],
+        "subject": f"Bekräftelse på din Televera-order {order.order_id}",
+        "text": _confirmation_text(order),
+        "html": _confirmation_html(order),
+    }
+    if settings.order_admin_email:
+        payload["bcc"] = [settings.order_admin_email]
+    if settings.smtp_reply_to:
+        payload["reply_to"] = settings.smtp_reply_to
+
+    async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+        response = await client.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {_resend_api_key()}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+
+
 async def _send_confirmation_email(order: OrderOut) -> IntegrationStatus:
     from_email = settings.smtp_from_email or settings.order_email_from
-    if not settings.smtp_host or not settings.smtp_username or not settings.smtp_password or not from_email:
-        return IntegrationStatus(configured=False, ok=True, message="SMTP saknar host, login, lösenord eller avsändare; hoppade över.")
+    resend_api_key = _resend_api_key()
+    smtp_configured = bool(settings.smtp_host and settings.smtp_username and settings.smtp_password and from_email)
+    resend_configured = bool(resend_api_key and from_email)
+    if not smtp_configured and not resend_configured:
+        return IntegrationStatus(configured=False, ok=True, message="Mail saknar Resend API key eller SMTP-inställningar; hoppade över.")
 
     try:
+        if resend_configured:
+            await _send_confirmation_email_resend(order)
+            return IntegrationStatus(configured=True, ok=True, message="Bekräftelsemail skickat via Resend API.")
+
         await to_thread(_send_confirmation_email_sync, order)
-        return IntegrationStatus(configured=True, ok=True, message="Bekräftelsemail skickat.")
+        return IntegrationStatus(configured=True, ok=True, message="Bekräftelsemail skickat via SMTP.")
     except Exception as exc:
         logger.exception("Kunde inte skicka ordermail för %s", order.order_id)
         return IntegrationStatus(configured=True, ok=False, message=str(exc))
@@ -659,7 +701,7 @@ async def _send_confirmation_email(order: OrderOut) -> IntegrationStatus:
 
 def _confirmation_email_is_configured() -> bool:
     from_email = settings.smtp_from_email or settings.order_email_from
-    return bool(settings.smtp_host and settings.smtp_username and settings.smtp_password and from_email)
+    return bool((_resend_api_key() and from_email) or (settings.smtp_host and settings.smtp_username and settings.smtp_password and from_email))
 
 
 @router.post("/orders", response_model=OrderCreateResponse)
