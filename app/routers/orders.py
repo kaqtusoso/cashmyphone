@@ -301,6 +301,34 @@ async def _get_google_sheet_id(client: httpx.AsyncClient, token: str) -> int:
     raise ValueError(f"Worksheet '{sheet_name}' saknas i Google Sheet.")
 
 
+def _google_sheet_data_row_format() -> dict[str, Any]:
+    return {
+        "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+        "horizontalAlignment": "LEFT",
+        "verticalAlignment": "MIDDLE",
+        "wrapStrategy": "CLIP",
+        "textFormat": {
+            "foregroundColor": {"red": 0.08, "green": 0.1, "blue": 0.15},
+            "bold": False,
+            "fontSize": 10,
+        },
+    }
+
+
+def _google_sheet_data_row_format_fields() -> str:
+    return "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)"
+
+
+def _range_end_row(range_name: str) -> int | None:
+    _, _, cell_range = range_name.partition("!")
+    if not cell_range:
+        return None
+
+    end_ref = cell_range.split(":")[-1]
+    digits = "".join(char for char in end_ref if char.isdigit())
+    return int(digits) if digits else None
+
+
 async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: int) -> None:
     spreadsheet_id = settings.google_sheets_spreadsheet_id
     column_count = len(SHEET_COLUMNS)
@@ -347,20 +375,8 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
                     "startColumnIndex": 0,
                     "endColumnIndex": column_count,
                 },
-                "cell": {
-                    "userEnteredFormat": {
-                        "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
-                        "horizontalAlignment": "LEFT",
-                        "verticalAlignment": "MIDDLE",
-                        "wrapStrategy": "CLIP",
-                        "textFormat": {
-                            "foregroundColor": {"red": 0.08, "green": 0.1, "blue": 0.15},
-                            "bold": False,
-                            "fontSize": 10,
-                        },
-                    }
-                },
-                "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)",
+                "cell": {"userEnteredFormat": _google_sheet_data_row_format()},
+                "fields": _google_sheet_data_row_format_fields(),
             }
         },
         {
@@ -509,6 +525,49 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
                 json={"values": [_sheet_values(order)]},
             )
             response.raise_for_status()
+            updated_range = response.json().get("updates", {}).get("updatedRange", "")
+            updated_end_row = _range_end_row(updated_range)
+            if updated_end_row:
+                format_response = await client.post(
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "requests": [
+                            {
+                                "repeatCell": {
+                                    "range": {
+                                        "sheetId": sheet_id,
+                                        "startRowIndex": updated_end_row - 1,
+                                        "endRowIndex": updated_end_row,
+                                        "startColumnIndex": 0,
+                                        "endColumnIndex": len(SHEET_COLUMNS),
+                                    },
+                                    "cell": {"userEnteredFormat": _google_sheet_data_row_format()},
+                                    "fields": _google_sheet_data_row_format_fields(),
+                                }
+                            },
+                            {
+                                "repeatCell": {
+                                    "range": {
+                                        "sheetId": sheet_id,
+                                        "startRowIndex": updated_end_row - 1,
+                                        "endRowIndex": updated_end_row,
+                                        "startColumnIndex": 5,
+                                        "endColumnIndex": 6,
+                                    },
+                                    "cell": {
+                                        "userEnteredFormat": {
+                                            "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
+                                            "horizontalAlignment": "RIGHT",
+                                        }
+                                    },
+                                    "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
+                                }
+                            },
+                        ]
+                    },
+                )
+                format_response.raise_for_status()
 
         return IntegrationStatus(configured=True, ok=True, message="Order skickad till Google Sheet via Sheets API.")
     except Exception as exc:
