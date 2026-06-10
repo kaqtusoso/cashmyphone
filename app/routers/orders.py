@@ -520,7 +520,7 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
             await _ensure_google_sheet_layout(client, token)
             response = await client.post(
                 f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{encoded_range}:append",
-                params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
+                params={"valueInputOption": "USER_ENTERED", "insertDataOption": "OVERWRITE"},
                 headers={"Authorization": f"Bearer {token}"},
                 json={"values": [_sheet_values(order)]},
             )
