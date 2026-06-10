@@ -96,7 +96,7 @@ class OrderCreateResponse(BaseModel):
 
 def _make_order(payload: OrderCreate) -> OrderOut:
     created_at = datetime.now(timezone.utc).isoformat()
-    order_id = payload.client_order_id or f"TLV-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:8].upper()}"
+    order_id = payload.client_order_id or f"TLV-{uuid4().hex[:10].upper()}"
     return OrderOut(order_id=order_id, created_at=created_at, **payload.model_dump())
 
 

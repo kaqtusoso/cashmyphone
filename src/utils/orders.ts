@@ -53,13 +53,11 @@ export interface OrderCreateResponse {
 }
 
 const makeOrderId = () => {
-  const date = new Date();
-  const yyyymmdd = date.toISOString().slice(0, 10).replace(/-/g, "");
-  const random = Array.from(crypto.getRandomValues(new Uint8Array(4)))
+  const random = Array.from(crypto.getRandomValues(new Uint8Array(5)))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("")
     .toUpperCase();
-  return `CMP-${yyyymmdd}-${random}`;
+  return `TLV-${random}`;
 };
 
 export const makeOptimisticOrder = (payload: OrderCreatePayload): Order => {
