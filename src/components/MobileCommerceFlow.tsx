@@ -267,6 +267,7 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
   );
   const best = sortedOffers[0];
   const low = sortedOffers[sortedOffers.length - 1]?.pris ?? 0;
+  const bidDifferenceSek = best ? best.pris - low : undefined;
   const activeOffer = selectedOffer ?? best;
   const deviceImage = getIphoneImage(model, color);
   const checkoutPaymentOptions = useMemo(
@@ -310,6 +311,7 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
         dealer_id: activeOffer.företag.toLowerCase().replace(/\s+/g, "-"),
         dealer_name: activeOffer.företag,
         price_sek: activeOffer.pris,
+        bid_difference_sek: bidDifferenceSek,
         shipping_option: shipping,
         shipping_label: shippingLabel,
         customer: {
@@ -331,7 +333,7 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
           paypal_email: payment === "paypal" ? form.paypalEmail.trim() : undefined,
         },
         condition_answers: conditionAnswers,
-        source: "cashmyphone_web" as const,
+        source: "televera_web" as const,
       };
       const optimisticOrder = makeOptimisticOrder(payload);
       const outboundPayload = { ...payload, client_order_id: optimisticOrder.order_id };

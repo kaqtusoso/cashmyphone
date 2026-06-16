@@ -28,12 +28,13 @@ export interface OrderCreatePayload {
   dealer_id: string;
   dealer_name: string;
   price_sek: number;
+  bid_difference_sek?: number;
   shipping_option: string;
   shipping_label: string;
   customer: OrderCustomer;
   payment: OrderPayment;
   condition_answers?: Record<string, unknown>;
-  source: "cashmyphone_web";
+  source: "televera_web";
 }
 
 export interface IntegrationStatus {

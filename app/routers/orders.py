@@ -25,6 +25,7 @@ SHEET_COLUMNS = [
     ("model", "Modell", 170),
     ("storage", "Lagring", 95),
     ("price_sek", "Pris (SEK)", 105),
+    ("bid_difference_sek", "Differens (SEK)", 125),
     ("shipping", "Frakt", 190),
     ("payment", "Betalning", 120),
     ("first_name", "Förnamn", 120),
@@ -70,6 +71,7 @@ class OrderCreate(BaseModel):
     dealer_id: str = Field(min_length=1)
     dealer_name: str = Field(min_length=1)
     price_sek: int = Field(ge=0)
+    bid_difference_sek: int | None = Field(default=None, ge=0)
     shipping_option: str = Field(min_length=1)
     shipping_label: str = Field(min_length=1)
     customer: OrderCustomer
@@ -192,6 +194,7 @@ def _sheet_row(order: OrderOut) -> dict[str, Any]:
         "model": order.model,
         "storage": order.storage,
         "price_sek": order.price_sek,
+        "bid_difference_sek": order.bid_difference_sek,
         "shipping": order.shipping_label,
         "payment": order.payment.label,
         "first_name": order.customer.first_name,
@@ -250,6 +253,23 @@ def _normalize_existing_sheet_row(headers: list[str], row: list[Any]) -> list[An
             mapped["condition_answers"] = _format_condition_answers(parsed)
 
     return [mapped.get(key, "") for key in SHEET_KEYS]
+
+
+def _sheet_column_letter(index: int) -> str:
+    letters = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def _sheet_values_range(sheet_name: str) -> str:
+    last_column = _sheet_column_letter(len(SHEET_COLUMNS))
+    return httpx.URL(f"https://example.com/{sheet_name}!A:{last_column}").raw_path.decode().lstrip("/")
+
+
+def _sheet_column_index(key: str) -> int:
+    return next(index for index, (column_key, _, _) in enumerate(SHEET_COLUMNS) if column_key == key)
 
 
 def _load_service_account_info() -> dict[str, Any]:
@@ -391,23 +411,6 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
             }
         },
         {
-            "repeatCell": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 1,
-                    "startColumnIndex": 5,
-                    "endColumnIndex": 6,
-                },
-                "cell": {
-                    "userEnteredFormat": {
-                        "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
-                        "horizontalAlignment": "RIGHT",
-                    }
-                },
-                "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
-            }
-        },
-        {
             "setBasicFilter": {
                 "filter": {
                     "range": {
@@ -437,6 +440,28 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
             }
         )
 
+    for money_key in ("price_sek", "bid_difference_sek"):
+        money_col = _sheet_column_index(money_key)
+        requests.append(
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "startColumnIndex": money_col,
+                        "endColumnIndex": money_col + 1,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
+                            "horizontalAlignment": "RIGHT",
+                        }
+                    },
+                    "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
+                }
+            }
+        )
+
     response = await client.post(
         f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
         headers={"Authorization": f"Bearer {token}"},
@@ -457,7 +482,11 @@ async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> 
     get_response.raise_for_status()
     existing_values = get_response.json().get("values", [])
 
-    if not existing_values or existing_values[0] != SHEET_HEADERS:
+    if existing_values and existing_values[0] != SHEET_HEADERS:
+        await _rebuild_google_sheet(client, token)
+        return
+
+    if not existing_values:
         update_response = await client.put(
             f"{base_url}/{encoded_range}",
             params={"valueInputOption": "RAW"},
@@ -472,7 +501,7 @@ async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> 
 async def _rebuild_google_sheet(client: httpx.AsyncClient, token: str) -> None:
     sheet_name = settings.google_sheets_worksheet_name
     spreadsheet_id = settings.google_sheets_spreadsheet_id
-    encoded_range = httpx.URL(f"https://example.com/{sheet_name}!A:R").raw_path.decode().lstrip("/")
+    encoded_range = _sheet_values_range(sheet_name)
     base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values"
     headers = {"Authorization": f"Bearer {token}"}
     sheet_id = await _get_google_sheet_id(client, token)
@@ -514,7 +543,7 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
         token = await _get_google_access_token()
         sheet_name = settings.google_sheets_worksheet_name
         spreadsheet_id = settings.google_sheets_spreadsheet_id
-        encoded_range = httpx.URL(f"https://example.com/{sheet_name}!A:R").raw_path.decode().lstrip("/")
+        encoded_range = _sheet_values_range(sheet_name)
 
         async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
             await _ensure_google_sheet_layout(client, token)
@@ -546,24 +575,27 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
                                     "fields": _google_sheet_data_row_format_fields(),
                                 }
                             },
-                            {
-                                "repeatCell": {
-                                    "range": {
-                                        "sheetId": sheet_id,
-                                        "startRowIndex": updated_end_row - 1,
-                                        "endRowIndex": updated_end_row,
-                                        "startColumnIndex": 5,
-                                        "endColumnIndex": 6,
-                                    },
-                                    "cell": {
-                                        "userEnteredFormat": {
-                                            "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
-                                            "horizontalAlignment": "RIGHT",
-                                        }
-                                    },
-                                    "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
+                            *[
+                                {
+                                    "repeatCell": {
+                                        "range": {
+                                            "sheetId": sheet_id,
+                                            "startRowIndex": updated_end_row - 1,
+                                            "endRowIndex": updated_end_row,
+                                            "startColumnIndex": _sheet_column_index(money_key),
+                                            "endColumnIndex": _sheet_column_index(money_key) + 1,
+                                        },
+                                        "cell": {
+                                            "userEnteredFormat": {
+                                                "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
+                                                "horizontalAlignment": "RIGHT",
+                                            }
+                                        },
+                                        "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
+                                    }
                                 }
-                            },
+                                for money_key in ("price_sek", "bid_difference_sek")
+                            ],
                         ]
                     },
                 )
