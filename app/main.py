@@ -54,7 +54,7 @@ app.include_router(orders.router)
 
 @app.get("/health", tags=["system"])
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.0.0", "order_email_template": "televera-2026-06-16-responsive"}
 
 
 @app.get("/", tags=["system"])
