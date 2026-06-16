@@ -768,43 +768,31 @@ def _confirmation_html(order: OrderOut) -> str:
 
                           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:18px;">
                             <tr>
-                              <td width="33.33%" valign="top" style="text-align:center;">
-                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-                                  <td style="vertical-align:top;"><div style="height:14px;font-size:0;line-height:0;">&nbsp;</div></td>
-                                  <td width="44" align="center" style="vertical-align:top;">
-                                    <div style="width:38px;height:38px;border-radius:19px;background:#15bd80;color:#ffffff;text-align:center;line-height:38px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">1</div>
-                                  </td>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
-                                </tr></table>
+                              <td width="46" style="padding:0 14px 14px 0;vertical-align:top;">
+                                <div style="width:34px;height:34px;border-radius:17px;background:#15bd80;color:#ffffff;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">1</div>
                               </td>
-                              <td width="33.33%" valign="top" style="text-align:center;">
-                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
-                                  <td width="44" align="center" style="vertical-align:top;">
-                                    <div style="width:38px;height:38px;border-radius:19px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">2</div>
-                                  </td>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
-                                </tr></table>
-                              </td>
-                              <td width="33.33%" valign="top" style="text-align:center;">
-                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
-                                  <td width="44" align="center" style="vertical-align:top;">
-                                    <div style="width:38px;height:38px;border-radius:19px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">3</div>
-                                  </td>
-                                  <td style="vertical-align:top;"><div style="height:14px;font-size:0;line-height:0;">&nbsp;</div></td>
-                                </tr></table>
+                              <td style="padding:0 0 14px;vertical-align:top;border-bottom:1px solid #d9dedb;">
+                                <div style="font-size:15px;line-height:20px;color:#2f322c;font-weight:700;">Skicka in</div>
+                                <div style="margin-top:3px;font-size:13px;line-height:19px;color:#8b918a;">Du får fraktsedeln och postar mobilen.</div>
                               </td>
                             </tr>
                             <tr>
-                              <td align="center" style="padding-top:12px;font-size:14px;line-height:18px;color:#2f322c;font-weight:700;">Skicka in</td>
-                              <td align="center" style="padding-top:12px;font-size:14px;line-height:18px;color:#2f322c;font-weight:700;">Kontroll</td>
-                              <td align="center" style="padding-top:12px;font-size:14px;line-height:18px;color:#2f322c;font-weight:700;">Pengar</td>
+                              <td width="46" style="padding:14px 14px 14px 0;vertical-align:top;">
+                                <div style="width:30px;height:30px;border-radius:15px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:26px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">2</div>
+                              </td>
+                              <td style="padding:14px 0;vertical-align:top;border-bottom:1px solid #d9dedb;">
+                                <div style="font-size:15px;line-height:20px;color:#2f322c;font-weight:700;">Kontroll</div>
+                                <div style="margin-top:3px;font-size:13px;line-height:19px;color:#8b918a;">{dealer_name} testar mobilen vid ankomst.</div>
+                              </td>
                             </tr>
                             <tr>
-                              <td align="center" class="tv-step-sub" style="padding:5px 8px 0;font-size:12.5px;line-height:17px;color:#8b918a;">Du får fraktsedeln och postar mobilen.</td>
-                              <td align="center" class="tv-step-sub" style="padding:5px 8px 0;font-size:12.5px;line-height:17px;color:#8b918a;">{dealer_name} testar mobilen vid ankomst.</td>
-                              <td align="center" class="tv-step-sub" style="padding:5px 8px 0;font-size:12.5px;line-height:17px;color:#8b918a;">Utbetalning via {payment_label} direkt efter OK.</td>
+                              <td width="46" style="padding:14px 14px 0 0;vertical-align:top;">
+                                <div style="width:30px;height:30px;border-radius:15px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:26px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">3</div>
+                              </td>
+                              <td style="padding:14px 0 0;vertical-align:top;">
+                                <div style="font-size:15px;line-height:20px;color:#2f322c;font-weight:700;">Pengar</div>
+                                <div style="margin-top:3px;font-size:13px;line-height:19px;color:#8b918a;">Utbetalning via {payment_label} direkt efter OK.</div>
+                              </td>
                             </tr>
                           </table>
                         </td>
