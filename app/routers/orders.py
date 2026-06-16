@@ -551,6 +551,7 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
 
         async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
             await _ensure_google_sheet_layout(client, token)
+            sheet_id = await _get_google_sheet_id(client, token)
             response = await client.post(
                 f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{encoded_range}:append",
                 params={"valueInputOption": "USER_ENTERED", "insertDataOption": "INSERT_ROWS"},
