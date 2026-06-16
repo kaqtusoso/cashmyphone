@@ -14,6 +14,7 @@ const heroModules = import.meta.glob("/src/assets/phonehero_heroes/*.png", {
 }) as HeroModule;
 
 const modelHeroKeys: Record<string, string> = {
+  "iPhone 17e": "iphone_17e",
   "iPhone Air": "iphone_air",
   "iPhone 17 Pro Max": "iphone_17_pro_max",
   "iPhone 17 Pro": "iphone_17_pro",
@@ -33,10 +34,12 @@ const modelHeroKeys: Record<string, string> = {
   "iPhone 14": "iphone_14",
   "iPhone 13 Pro Max": "iphone_13_pro_max",
   "iPhone 13 Pro": "iphone_13_pro",
+  "iPhone 13 mini": "iphone_13_mini",
   "iPhone 13 Mini": "iphone_13_mini",
   "iPhone 13": "iphone_13",
   "iPhone 12 Pro Max": "iphone_12_pro_max",
   "iPhone 12 Pro": "iphone_12_pro",
+  "iPhone 12 mini": "iphone_12_mini",
   "iPhone 12 Mini": "iphone_12_mini",
   "iPhone 12": "iphone_12",
   "iPhone 11 Pro Max": "iphone_11_pro_max",

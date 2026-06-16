@@ -3,7 +3,7 @@ import { API_URL } from "@/utils/apiClient";
 export interface OrderCustomer {
   first_name: string;
   last_name: string;
-  personal_number: string;
+  personal_number?: string;
   address: string;
   postal_code: string;
   city: string;

@@ -18,11 +18,12 @@ import type { CompanyOffer } from "@/types/offers";
 import { fetchQuotes } from "@/utils/apiQuote";
 import { getDefaultIphoneColor, getIphoneColorOptions, getIphoneImage, type IphoneColorOption } from "@/utils/iphoneImage";
 import { modelToSlug } from "@/utils/modelSlug";
+import { trackEvent, trackStepView } from "@/utils/tracking";
 import { useIphoneCatalog } from "@/hooks/useIphoneCatalog";
 import { useSavedOffers } from "@/hooks/useSavedOffers";
 import type { SavedOffer } from "@/types/savedOffers";
 
-import cmpLogo from "@/assets/logo-green.png";
+import cmpLogo from "@/assets/televera-logo-full.png";
 import swappieLogo from "@/assets/swappie-logo.png";
 import fixmyphoneLogo from "@/assets/fixmyphone-logo.png";
 import fixiphoneLogo from "@/assets/fixiphone-logo.png";
@@ -36,13 +37,15 @@ interface UnifiedFlowProps {
   onShowResults?: (showing: boolean) => void;
   onModelSelected?: (selected: boolean) => void;
   initialModel?: string;
+  initialStepSlug?: string;
 }
 
 interface RestoreLocationState {
   restoreFromSavedOffer?: SavedOffer;
 }
 
-type StepKey = "model" | "color" | "storage" | "battery" | "function" | "glass" | "wear" | "sides" | "back" | "results";
+type StepKey = "model" | "color" | "storage" | "battery" | "screen" | "display" | "sides" | "back" | "function" | "results";
+type ScreenConditionMode = "perfect" | "micro" | "lightScratches" | "visibleScratches" | "deepScratches" | "chipped";
 
 type Option<T extends string> = {
   value: T;
@@ -54,23 +57,41 @@ const FLOW_STEPS: Exclude<StepKey, "model" | "results">[] = [
   "color",
   "storage",
   "battery",
-  "function",
-  "glass",
-  "wear",
+  "display",
+  "screen",
   "sides",
   "back",
+  "function",
 ];
 
 const STEP_LABELS: Record<Exclude<StepKey, "model" | "results">, string> = {
   color: "Färg",
   storage: "Lagring",
   battery: "Batteri",
-  function: "Funktionskoll",
-  glass: "Skärmglas",
-  wear: "Skärmskick",
+  screen: "Skärm",
+  display: "Bild/touch",
   sides: "Sidor",
   back: "Baksida",
+  function: "Funktionskoll",
 };
+
+const STEP_SLUGS: Record<Exclude<StepKey, "model">, string> = {
+  color: "farg",
+  storage: "lagring",
+  battery: "batteri",
+  display: "skarm-funktion",
+  screen: "skarm-skick",
+  sides: "sidor",
+  back: "baksida",
+  function: "funktion",
+  results: "resultat",
+};
+
+const SLUG_TO_STEP = Object.fromEntries(
+  Object.entries(STEP_SLUGS).map(([step, slug]) => [slug, step]),
+) as Record<string, Exclude<StepKey, "model">>;
+
+const LEGACY_FORM_QUERY = "legacyForm";
 
 const partnerLogos = [
   telestoreLogo,
@@ -139,15 +160,64 @@ const wearOptions: Option<WearLevel>[] = [
   { value: "visible", label: "Synligt slitage - tydliga repor", summary: "Synliga repor" },
   { value: "some", label: "Repor som syns vid vissa vinklar", summary: "Lätta repor" },
   { value: "minimal", label: "Minimalt slitage - enstaka mikrorepor", summary: "Mikrorepor" },
-  { value: "none", label: "Inga tecken - som ny", summary: "Som ny" },
+  { value: "none", label: "Som ny", summary: "Som ny" },
+];
+
+const screenConditionOptions: {
+  value: ScreenConditionMode;
+  label: string;
+  glass: ScreenGlass;
+  wear: WearLevel;
+}[] = [
+  { value: "perfect", label: "Som ny", glass: "none", wear: "none" },
+  { value: "micro", label: "Mikrorepor", glass: "none", wear: "minimal" },
+  { value: "lightScratches", label: "Lätta repor", glass: "none", wear: "some" },
+  { value: "visibleScratches", label: "Tydliga repor", glass: "none", wear: "visible" },
+  { value: "deepScratches", label: "Djupa repor i glaset", glass: "scratched", wear: "visible" },
+  { value: "chipped", label: "Flisor eller sprickor", glass: "chipped", wear: "visible" },
 ];
 
 const sideOptions: Option<WearLevelWithCrack>[] = [
-  { value: "cracked", label: "Sprucken eller trasig", summary: "Sprucken" },
-  { value: "visible", label: "Synligt slitage - repor eller bucklor", summary: "Synliga skador" },
-  { value: "some", label: "Repor som syns vid vinklar", summary: "Lätta repor" },
+  { value: "none", label: "Som ny", summary: "Som ny" },
   { value: "minimal", label: "Minimalt slitage", summary: "Minimalt" },
-  { value: "none", label: "Inga tecken - som ny", summary: "Som ny" },
+  { value: "some", label: "Repor som syns vid vinklar", summary: "Lätta repor" },
+  { value: "visible", label: "Synligt slitage - repor eller bucklor", summary: "Synliga skador" },
+  { value: "cracked", label: "Sprucken eller trasig", summary: "Sprucken" },
+];
+
+const functionalIssueOptions: {
+  key: keyof ConditionAnswers["functional"];
+  label: string;
+  summary: string;
+}[] = [
+  { key: "powersOn", label: "Startar inte", summary: "Startar inte" },
+  { key: "faceId", label: "Face ID / Touch ID fungerar inte", summary: "Face ID" },
+  { key: "network", label: "Nätverk eller SIM fungerar inte", summary: "Nätverk" },
+  { key: "selfieCamera", label: "Selfie-kameran fungerar inte", summary: "Selfie-kamera" },
+  { key: "rearCamera", label: "Bakre kameran fungerar inte", summary: "Kamera" },
+  { key: "speaker", label: "Högtalare eller mikrofon fungerar inte", summary: "Ljud" },
+  { key: "chargingOrButtons", label: "Laddning eller knappar fungerar inte", summary: "Laddning/knappar" },
+  { key: "other", label: "Annat fel", summary: "Annat fel" },
+];
+
+const screenFunctionOptions: {
+  key: keyof ConditionAnswers["screenFunction"];
+  label: string;
+  summary: string;
+}[] = [
+  { key: "brightSpots", label: "Ljusa fläckar", summary: "Fläckar" },
+  { key: "deadPixels", label: "Döda pixlar", summary: "Pixlar" },
+  { key: "linesOrBurnIn", label: "Linjer eller inbränning", summary: "Linjer/inbränning" },
+  { key: "touchIssue", label: "Touchproblem", summary: "Touch" },
+];
+
+const physicalFunctionIssueOptions: {
+  key: keyof NonNullable<ConditionAnswers["critical"]>;
+  label: string;
+  summary: string;
+}[] = [
+  { key: "bent", label: "Telefonen är böjd", summary: "Böjd" },
+  { key: "waterDamaged", label: "Fuktskada eller vattenskada", summary: "Fuktskada" },
 ];
 
 const defaultAnswers: ConditionAnswers = {
@@ -156,6 +226,7 @@ const defaultAnswers: ConditionAnswers = {
     brightSpots: false,
     deadPixels: false,
     linesOrBurnIn: false,
+    touchIssue: false,
     allWorks: true,
   },
   screenFunctionAnswered: true,
@@ -166,12 +237,90 @@ const stepIndex = (step: StepKey) => FLOW_STEPS.indexOf(step as Exclude<StepKey,
 const isFlowStep = (step: StepKey): step is Exclude<StepKey, "model" | "results"> => FLOW_STEPS.includes(step as Exclude<StepKey, "model" | "results">);
 const optionSummary = <T extends string>(options: Option<T>[], value: T | null) => options.find((option) => option.value === value)?.summary ?? "-";
 const newSavedOfferId = () => (crypto.randomUUID ? crypto.randomUUID() : `offer-${Date.now()}`);
+const isLegacyFormEnabled = () => new URLSearchParams(window.location.search).has(LEGACY_FORM_QUERY);
+const deriveScreenConditionMode = (answers: ConditionAnswers): ScreenConditionMode | null => {
+  if (!answers.screenGlass || !answers.screenWear) return null;
+  if (answers.screenGlass === "chipped") return "chipped";
+  if (answers.screenGlass === "scratched") return "deepScratches";
+  if (answers.screenWear === "visible") return "visibleScratches";
+  if (answers.screenWear === "some") return "lightScratches";
+  if (answers.screenWear === "minimal") return "micro";
+  return "perfect";
+};
+const deriveScreenFaultMode = (answers: ConditionAnswers): "works" | "faults" | null => {
+  if (!answers.screenFunctionAnswered) return null;
+  return answers.screenFunction.allWorks ? "works" : "faults";
+};
+
+const allFunctionalOk = (answers: ConditionAnswers) =>
+  functionalIssueOptions.every((option) => answers.functional[option.key] !== false) &&
+  physicalFunctionIssueOptions.every((option) => !answers.critical?.[option.key]);
+
+const hasAnsweredFunction = (answers: ConditionAnswers) =>
+  answers.functional.powersOn !== null;
+
+const functionSummary = (answers: ConditionAnswers) => {
+  if (!hasAnsweredFunction(answers)) return "-";
+  if (allFunctionalOk(answers)) return "Allt OK";
+  const issues = functionalIssueOptions
+    .filter((option) => answers.functional[option.key] === false)
+    .map((option) => option.summary);
+  const physicalIssues = physicalFunctionIssueOptions
+    .filter((option) => answers.critical?.[option.key])
+    .map((option) => option.summary);
+  const allIssues = [...issues, ...physicalIssues];
+  return allIssues.length ? allIssues.join(", ") : "Fel finns";
+};
+
+const persistedFlowKey = (model: string) => `televera:flow:${modelToSlug(model)}`;
+
+const getFirstIncompleteStep = ({
+  color,
+  storage,
+  answers,
+  batteryMode,
+  screenConditionMode,
+  screenFaultMode,
+  functionMode,
+}: {
+  color: string;
+  storage: string;
+  answers: ConditionAnswers;
+  batteryMode: "input" | "cant" | null;
+  screenConditionMode: ScreenConditionMode | null;
+  screenFaultMode: "works" | "faults" | null;
+  functionMode: "yes" | "no" | null;
+}): Exclude<StepKey, "model" | "results"> => {
+  if (!color) return "color";
+  if (!storage) return "storage";
+  if (!(batteryMode === "cant" || (answers.batteryHealth !== null && answers.batteryHealth >= 1 && answers.batteryHealth <= 100))) return "battery";
+  if (!screenFaultMode) return "display";
+  if (!screenConditionMode || !answers.screenGlass || !answers.screenWear) return "screen";
+  if (!answers.sidesWear) return "sides";
+  if (!answers.backWear) return "back";
+  if (!functionMode) return "function";
+  return "function";
+};
+
+const screenSummary = (answers: ConditionAnswers) => {
+  const glass = optionSummary(glassOptions, answers.screenGlass);
+  const wear = optionSummary(wearOptions, answers.screenWear);
+  const parts = [];
+  if (wear !== "-") parts.push(wear);
+  if (glass !== "-" && glass !== "Inga skador") parts.unshift(glass);
+  if (answers.screenFunctionAnswered && !answers.screenFunction.allWorks) {
+    const faults = screenFunctionOptions
+      .filter((option) => Boolean(answers.screenFunction[option.key]))
+      .map((option) => option.summary);
+    parts.push(faults.length ? faults.join(", ") : "Skärmfel");
+  }
+  return parts.length ? parts.join(" · ") : "-";
+};
 
 const Nav = ({ onSell }: { onSell: () => void }) => (
   <nav className="claude-nav">
     <a className="claude-brand" href="/">
-      <img src={cmpLogo} alt="CashMyPhone" />
-      <span>CashMyPhone</span>
+      <img src={cmpLogo} alt="Televera" />
     </a>
     <div className="claude-nav-links">
       <a href="/#sa-funkar-det">Så funkar det</a>
@@ -231,7 +380,10 @@ const SearchBox = ({
           {models.length ? (
             models.map((model) => (
               <button key={model} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(model)}>
-                {model}
+                <span className="claude-search-thumb" aria-hidden>
+                  <img src={getIphoneImage(model)} alt="" loading="lazy" decoding="async" />
+                </span>
+                <span>{model}</span>
               </button>
             ))
           ) : (
@@ -278,15 +430,10 @@ const DevicePanel = ({
     { key: "color", label: "Färg", value: selectedColor?.label ?? "-" },
     { key: "storage", label: "Lagring", value: storage ? formatStorage(storage) : "-" },
     { key: "battery", label: "Batteri", value: answers.batteryHealth === null ? "-" : `${answers.batteryHealth}%` },
-    {
-      key: "function",
-      label: "Funktionskoll",
-      value: functionalQuestions.every((question) => answers.functional[question.key] !== null) ? "Allt OK" : "-",
-    },
-    { key: "glass", label: "Skärmglas", value: optionSummary(glassOptions, answers.screenGlass) },
-    { key: "wear", label: "Skärmskick", value: optionSummary(wearOptions, answers.screenWear) },
+    { key: "screen", label: "Skärm", value: screenSummary(answers) },
     { key: "sides", label: "Sidor", value: optionSummary(sideOptions, answers.sidesWear) },
     { key: "back", label: "Baksida", value: optionSummary(sideOptions, answers.backWear) },
+    { key: "function", label: "Funktionskoll", value: functionSummary(answers) },
   ];
 
   return (
@@ -396,17 +543,21 @@ const Foot = ({
   </div>
 );
 
-const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFlowProps) => {
+const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStepSlug }: UnifiedFlowProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { addSavedOffer } = useSavedOffers();
+  const requestedInitialStep = initialStepSlug ? SLUG_TO_STEP[initialStepSlug] : undefined;
 
-  const [step, setStep] = useState<StepKey>(initialModel ? "color" : "model");
+  const [step, setStep] = useState<StepKey>(initialModel ? requestedInitialStep ?? "color" : "model");
   const [model, setModel] = useState(initialModel ?? "");
   const [color, setColor] = useState("");
   const [storage, setStorage] = useState("");
   const [answers, setAnswers] = useState<ConditionAnswers>(defaultAnswers);
   const [batteryMode, setBatteryMode] = useState<"input" | "cant" | null>(null);
+  const [functionMode, setFunctionMode] = useState<"yes" | "no" | null>(null);
+  const [screenConditionMode, setScreenConditionMode] = useState<ScreenConditionMode | null>(null);
+  const [screenFaultMode, setScreenFaultMode] = useState<"works" | "faults" | null>(null);
   const [funcIndex, setFuncIndex] = useState(0);
   const [results, setResults] = useState<CompanyOffer[] | null>(null);
   const [submittedAnswers, setSubmittedAnswers] = useState<ConditionAnswers | null>(null);
@@ -419,7 +570,9 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   const [savedOfferId, setSavedOfferId] = useState<string | undefined>();
   const flowRootRef = useRef<HTMLDivElement>(null);
   const functionCardRef = useRef<HTMLDivElement>(null);
+  const viewedAtRef = useRef(Date.now());
   const { models: iphoneModels, storageByModel } = useIphoneCatalog();
+  const legacyForm = isLegacyFormEnabled();
 
   const filteredModels = useMemo(() => {
     const normalized = search.trim().toLowerCase();
@@ -431,6 +584,127 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   const availableColors = useMemo(() => (model ? getIphoneColorOptions(model) : []), [model]);
 
   useEffect(() => {
+    if (!initialModel) return;
+    const persisted = (() => {
+      try {
+        return JSON.parse(sessionStorage.getItem(persistedFlowKey(initialModel)) || "null") as {
+          color?: string;
+          storage?: string;
+          answers?: ConditionAnswers;
+          batteryMode?: "input" | "cant" | null;
+          functionMode?: "yes" | "no" | null;
+          screenConditionMode?: ScreenConditionMode | null;
+          screenFaultMode?: "works" | "faults" | null;
+          funcIndex?: number;
+        } | null;
+      } catch {
+        return null;
+      }
+    })();
+
+    if (!persisted) return;
+    const restoredAnswers = persisted.answers ?? defaultAnswers;
+    setColor(persisted.color ?? "");
+    setStorage(persisted.storage ?? "");
+    setAnswers(restoredAnswers);
+    setBatteryMode(persisted.batteryMode ?? null);
+    setFunctionMode(persisted.functionMode ?? null);
+    setScreenConditionMode(persisted.screenConditionMode ?? deriveScreenConditionMode(restoredAnswers));
+    setScreenFaultMode(persisted.screenFaultMode ?? deriveScreenFaultMode(restoredAnswers));
+    setFuncIndex(persisted.funcIndex ?? 0);
+  }, [initialModel]);
+
+  useEffect(() => {
+    if (!model || step === "model") return;
+    try {
+      sessionStorage.setItem(
+        persistedFlowKey(model),
+        JSON.stringify({
+          color,
+          storage,
+          answers,
+          batteryMode,
+          functionMode,
+          screenConditionMode,
+          screenFaultMode,
+          funcIndex,
+        }),
+      );
+    } catch {
+      // Storage is a convenience for refresh recovery; the flow still works without it.
+    }
+  }, [answers, batteryMode, color, funcIndex, functionMode, model, screenConditionMode, screenFaultMode, step, storage]);
+
+  useEffect(() => {
+    if (!initialModel || !requestedInitialStep || requestedInitialStep === "results") return;
+    const firstIncomplete = getFirstIncompleteStep({
+      color,
+      storage,
+      answers,
+      batteryMode,
+      screenConditionMode,
+      screenFaultMode,
+      functionMode,
+    });
+    if (stepIndex(requestedInitialStep) > stepIndex(firstIncomplete)) {
+      setStep(firstIncomplete);
+    }
+  }, [answers, batteryMode, color, functionMode, initialModel, requestedInitialStep, screenConditionMode, screenFaultMode, storage]);
+
+  useEffect(() => {
+    if (!model || step === "model") return;
+    const slug = STEP_SLUGS[step as Exclude<StepKey, "model">];
+    if (!slug) return;
+    const modelPath = `/salja/${modelToSlug(model)}`;
+    const hasStepInPath = location.pathname.startsWith(`${modelPath}/`);
+    const stepPath = step === "color" && !hasStepInPath ? modelPath : `${modelPath}/${slug}`;
+    const target = `${stepPath}${location.search}`;
+    if (`${location.pathname}${location.search}` !== target) {
+      navigate(target, { replace: true });
+    }
+  }, [location.pathname, location.search, model, navigate, step]);
+
+  useEffect(() => {
+    const now = Date.now();
+    viewedAtRef.current = now;
+    if (step === "model") {
+      trackStepView("landing_viewed", { funnel: "quote" });
+      return;
+    }
+    if (step === "results") {
+      trackStepView("quote_results_viewed", {
+        funnel: "quote",
+        model,
+        storage,
+        offer_count: results?.length ?? 0,
+        best_price: results?.[0]?.pris,
+      });
+      return;
+    }
+    trackStepView("quote_step_viewed", {
+      funnel: "quote",
+      step,
+      step_label: STEP_LABELS[step],
+      step_index: stepIndex(step) + 1,
+      model,
+      storage,
+    });
+  }, [model, results, step, storage]);
+
+  const trackStepCompleted = (completedStep: StepKey, extra: Record<string, string | number | boolean | null | undefined> = {}) => {
+    if (completedStep === "model") return;
+    trackEvent("quote_step_completed", {
+      funnel: "quote",
+      step: completedStep,
+      step_index: isFlowStep(completedStep) ? stepIndex(completedStep) + 1 : undefined,
+      model,
+      storage,
+      duration_ms: Date.now() - viewedAtRef.current,
+      ...extra,
+    });
+  };
+
+  useEffect(() => {
     const state = location.state as RestoreLocationState | null;
     if (!state?.restoreFromSavedOffer) return;
 
@@ -438,8 +712,12 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
     setModel(saved.model);
     setColor("");
     setStorage(saved.storage);
-    setAnswers(saved.condition ?? defaultAnswers);
+    const restoredCondition = saved.condition ?? defaultAnswers;
+    setAnswers(restoredCondition);
     setSubmittedAnswers(saved.condition ?? null);
+    setFunctionMode(hasAnsweredFunction(restoredCondition) ? (allFunctionalOk(restoredCondition) ? "yes" : "no") : null);
+    setScreenConditionMode(deriveScreenConditionMode(restoredCondition));
+    setScreenFaultMode(deriveScreenFaultMode(restoredCondition));
     if (saved.offers?.length) {
       setResults(saved.offers);
       setStep("results");
@@ -473,6 +751,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   };
 
   const go = (next: StepKey) => {
+    trackStepCompleted(step);
     setStep(next);
     onShowResults?.(next === "results");
     scrollToFlowTop();
@@ -492,10 +771,17 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
     setAnswers(defaultAnswers);
     setSubmittedAnswers(null);
     setBatteryMode(null);
+    setFunctionMode(null);
+    setScreenConditionMode(null);
+    setScreenFaultMode(null);
     setFuncIndex(0);
     setSearchOpen(false);
     onModelSelected?.(true);
-    navigate(`/salja/${modelToSlug(selectedModel)}`);
+    trackEvent("model_selected", {
+      funnel: "quote",
+      model: selectedModel,
+    });
+    navigate(`/salja/${modelToSlug(selectedModel)}${location.search}`);
   };
 
   const reset = () => {
@@ -507,6 +793,9 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
     setAnswers(defaultAnswers);
     setSubmittedAnswers(null);
     setBatteryMode(null);
+    setFunctionMode(null);
+    setScreenConditionMode(null);
+    setScreenFaultMode(null);
     setResults(null);
     setFuncIndex(0);
     onShowResults?.(false);
@@ -519,13 +808,13 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
       reset();
       return;
     }
-    if (step === "function" && funcIndex > 0 && funcIndex < functionalQuestions.length) {
+    if (legacyForm && step === "function" && funcIndex > 0 && funcIndex < functionalQuestions.length) {
       setFuncIndex((current) => current - 1);
       scrollToFunctionQuestion();
       return;
     }
     if (step === "results") {
-      go("back");
+      go(FLOW_STEPS[FLOW_STEPS.length - 1]);
       return;
     }
 
@@ -551,14 +840,14 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   };
 
   const computeAndShow = async () => {
+    const critical = answers.critical ?? initialConditionAnswers.critical;
     const quoteAnswers: ConditionAnswers = {
       ...answers,
-      screenFunction: {
-        brightSpots: false,
-        deadPixels: false,
-        linesOrBurnIn: false,
-        allWorks: true,
+      functional: {
+        ...answers.functional,
+        bentOrWaterDamaged: Boolean(critical?.bent || critical?.waterDamaged),
       },
+      critical,
       screenFunctionAnswered: true,
     };
 
@@ -568,15 +857,14 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
       const offers = await fetchQuotes(model, storage, quoteAnswers);
       setResults(offers);
       setSubmittedAnswers(quoteAnswers);
-      setResultsTimestamp(
-        new Date().toLocaleString("sv-SE", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
+      setResultsTimestamp(offers[0]?.uppdaterad ?? "");
+      trackEvent("quote_submitted", {
+        funnel: "quote",
+        model,
+        storage,
+        offer_count: offers.length,
+        best_price: offers[0]?.pris,
+      });
       go("results");
     } catch (error) {
       console.error(error);
@@ -587,6 +875,13 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
   };
 
   const handleSelectOffer = (offer: CompanyOffer) => {
+    trackEvent("offer_selected", {
+      funnel: "quote",
+      model,
+      storage,
+      dealer: offer.företag,
+      price: offer.pris,
+    });
     const id = newSavedOfferId();
     addSavedOffer({
       id,
@@ -619,11 +914,6 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
             models={filteredModels}
             onSelect={selectModel}
           />
-          <div className="claude-pills">
-            <span>Tar 30 sek</span>
-            <span>Swish / banköverföring</span>
-            <span>Fri frakt</span>
-          </div>
         </div>
       </section>
       <section className="claude-partners">
@@ -637,8 +927,8 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
       <section id="sa-funkar-det" className="claude-info-section">
         {[
           ["Sök & jämför bud", "Skriv in din modell och se bud från flera återförsäljare direkt.", Search],
-          ["Välj & skicka", "Välj det bästa budet och skicka telefonen gratis med fraktsedel.", Truck],
-          ["Få betalt", "Återförsäljaren kontrollerar mobilen och betalar ut via Swish eller bank.", Wallet],
+          ["Välj köpare", "Välj det bästa budet och följ köparens instruktioner.", Truck],
+          ["Slutför affären", "Köparen kontrollerar mobilen och betalar ut enligt sina villkor.", Wallet],
         ].map(([title, text, Icon], index) => (
           <article key={String(title)}>
             <span>{index + 1}</span>
@@ -662,7 +952,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
     if (currentStep === "color") {
       return (
         <>
-          <h1>Vilken färg har den?</h1>
+          <h1>Vilken färg är den?</h1>
           <InfoBox>Välj färgen på din {model}.</InfoBox>
           <div className="claude-color-grid">
             {availableColors.map((option: IphoneColorOption) => {
@@ -756,12 +1046,124 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
             <strong>Kan inte kontrollera</strong>
             <small>Vi bekräftar kapaciteten åt dig efter inspektion.</small>
           </button>
-          <Foot onBack={goBack} onNext={() => go("function")} disabled={!valid} />
+          <Foot onBack={goBack} onNext={() => go("display")} disabled={!valid} />
         </>
       );
     }
 
     if (currentStep === "function") {
+      if (!legacyForm) {
+        const issues = functionalIssueOptions.filter((option) => answers.functional[option.key] === false);
+        const physicalIssues = physicalFunctionIssueOptions.filter((option) => answers.critical?.[option.key]);
+        const done = functionMode === "yes" || (functionMode === "no" && (issues.length > 0 || physicalIssues.length > 0));
+
+        const setAllWorks = () => {
+          setFunctionMode("yes");
+          setAnswers((current) => ({
+            ...current,
+            functional: {
+              ...current.functional,
+              powersOn: true,
+              network: true,
+              faceId: true,
+              selfieCamera: true,
+              rearCamera: true,
+              speaker: true,
+              chargingOrButtons: true,
+              other: true,
+              bentOrWaterDamaged: false,
+            },
+            critical: { ...initialConditionAnswers.critical! },
+          }));
+        };
+
+        const setHasIssues = () => {
+          setFunctionMode("no");
+        };
+
+        const toggleIssue = (key: keyof ConditionAnswers["functional"]) => {
+          setFunctionMode("no");
+          setAnswers((current) => {
+            const selected = current.functional[key] === false;
+            const nextFunctional = {
+              ...current.functional,
+              powersOn: current.functional.powersOn ?? true,
+              network: current.functional.network ?? true,
+              faceId: current.functional.faceId ?? true,
+              selfieCamera: current.functional.selfieCamera ?? true,
+              rearCamera: current.functional.rearCamera ?? true,
+              speaker: current.functional.speaker ?? true,
+              chargingOrButtons: current.functional.chargingOrButtons ?? true,
+              other: current.functional.other ?? true,
+              bentOrWaterDamaged: current.functional.bentOrWaterDamaged ?? false,
+              [key]: selected ? true : false,
+            };
+            return { ...current, functional: nextFunctional };
+          });
+        };
+
+        const togglePhysicalIssue = (key: keyof NonNullable<ConditionAnswers["critical"]>) => {
+          setFunctionMode("no");
+          setAnswers((current) => {
+            const nextCritical = {
+              ...(current.critical ?? initialConditionAnswers.critical!),
+              [key]: !(current.critical ?? initialConditionAnswers.critical!)[key],
+            };
+            return {
+              ...current,
+              critical: nextCritical,
+              functional: {
+                ...current.functional,
+                bentOrWaterDamaged: Boolean(nextCritical.bent || nextCritical.waterDamaged),
+              },
+            };
+          });
+        };
+
+        return (
+          <>
+            <h1>Fungerar telefonen som den ska?</h1>
+            <InfoBox>Välj Ja om allt fungerar normalt. Om något är fel kan du välja Nej och markera det som inte fungerar.</InfoBox>
+            <div className="claude-radio-list">
+              <button type="button" className={functionMode === "yes" ? "selected" : ""} onClick={setAllWorks}>
+                <span aria-hidden />
+                <strong>Ja</strong>
+              </button>
+              <button type="button" className={functionMode === "no" ? "selected" : ""} onClick={setHasIssues}>
+                <span aria-hidden />
+                <strong>Nej</strong>
+              </button>
+            </div>
+            {functionMode === "no" ? (
+              <div className="claude-dropdown-panel">
+                <h2>Vad fungerar inte?</h2>
+                <div className="claude-checkbox-list">
+                  {functionalIssueOptions.map((option) => {
+                    const selected = answers.functional[option.key] === false;
+                    return (
+                      <button key={option.key} type="button" className={selected ? "selected" : ""} onClick={() => toggleIssue(option.key)}>
+                        <span aria-hidden />
+                        <strong>{option.label}</strong>
+                      </button>
+                    );
+                  })}
+                  {physicalFunctionIssueOptions.map((option) => {
+                    const selected = Boolean(answers.critical?.[option.key]);
+                    return (
+                      <button key={option.key} type="button" className={selected ? "selected" : ""} onClick={() => togglePhysicalIssue(option.key)}>
+                        <span aria-hidden />
+                        <strong>{option.label}</strong>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <Foot onBack={goBack} onNext={computeAndShow} disabled={!done} loading={loadingResults} nextLabel="Beräkna bästa bud" />
+          </>
+        );
+      }
+
       const done = functionalQuestions.every((question) => answers.functional[question.key] !== null);
       const active = funcIndex < functionalQuestions.length ? functionalQuestions[funcIndex] : null;
 
@@ -798,28 +1200,12 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
               </div>
             </div>
           ) : null}
-          <Foot onBack={goBack} onNext={() => go("glass")} disabled={!done} />
+          <Foot onBack={goBack} onNext={computeAndShow} disabled={!done} loading={loadingResults} nextLabel="Beräkna bästa bud" />
         </>
       );
     }
 
     const conditionScreens = {
-      glass: {
-        title: "Hur ser glaset ut?",
-        hint: "Håll upp telefonen mot ljuset och titta noga efter sprickor, flisor och repor.",
-        options: glassOptions,
-        value: answers.screenGlass,
-        set: (value: ScreenGlass) => setAnswers((current) => ({ ...current, screenGlass: value })),
-        next: () => go("wear"),
-      },
-      wear: {
-        title: "Hur är skärmens skick?",
-        hint: "Titta med skärmen på, gärna mot en ljus bakgrund.",
-        options: wearOptions,
-        value: answers.screenWear,
-        set: (value: WearLevel) => setAnswers((current) => ({ ...current, screenWear: value })),
-        next: () => go("sides"),
-      },
       sides: {
         title: "Hur ser sidorna ut?",
         hint: "Titta längs kanterna och ramens sidor - kika efter repor, bucklor och sprickor.",
@@ -834,9 +1220,123 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
         options: sideOptions,
         value: answers.backWear,
         set: (value: WearLevelWithCrack) => setAnswers((current) => ({ ...current, backWear: value })),
-        next: computeAndShow,
+        next: () => go("function"),
       },
-    }[currentStep];
+    }[currentStep as "sides" | "back"];
+
+    if (currentStep === "screen") {
+      const screenValid = Boolean(screenConditionMode && answers.screenGlass && answers.screenWear);
+      const selectScreenCondition = (option: (typeof screenConditionOptions)[number]) => {
+        setScreenConditionMode(option.value);
+        setAnswers((current) => ({
+          ...current,
+          screenGlass: option.glass,
+          screenWear: option.wear,
+        }));
+      };
+
+      return (
+        <>
+          <h1>Hur är skärmens skick?</h1>
+          <InfoBox>Välj det alternativ som passar bäst.</InfoBox>
+          <div className="claude-radio-list">
+            {screenConditionOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={screenConditionMode === option.value ? "selected" : ""}
+                onClick={() => selectScreenCondition(option)}
+              >
+                <span aria-hidden />
+                <strong>{option.label}</strong>
+              </button>
+            ))}
+          </div>
+          <Foot onBack={goBack} onNext={() => go("sides")} disabled={!screenValid} />
+        </>
+      );
+    }
+
+    if (currentStep === "display") {
+      const selectedScreenFaults = screenFunctionOptions.filter((option) => Boolean(answers.screenFunction[option.key]));
+      const displayValid = screenFaultMode === "works" || (screenFaultMode === "faults" && selectedScreenFaults.length > 0);
+      const setScreenWorks = () => {
+        setScreenFaultMode("works");
+        setAnswers((current) => ({
+          ...current,
+          screenFunction: {
+            brightSpots: false,
+            deadPixels: false,
+            linesOrBurnIn: false,
+            touchIssue: false,
+            allWorks: true,
+          },
+          screenFunctionAnswered: true,
+        }));
+      };
+      const setScreenHasFaults = () => {
+        setScreenFaultMode("faults");
+        setAnswers((current) => ({
+          ...current,
+          screenFunction: {
+            ...current.screenFunction,
+            allWorks: false,
+          },
+          screenFunctionAnswered: true,
+        }));
+      };
+      const toggleScreenFault = (key: keyof ConditionAnswers["screenFunction"]) => {
+        setScreenFaultMode("faults");
+        setAnswers((current) => {
+          const next = {
+            ...current.screenFunction,
+            [key]: !current.screenFunction[key],
+          };
+          const hasFault = screenFunctionOptions.some((option) => Boolean(next[option.key]));
+          return {
+            ...current,
+            screenFunction: {
+              ...next,
+              allWorks: !hasFault,
+            },
+            screenFunctionAnswered: true,
+          };
+        });
+      };
+
+      return (
+        <>
+          <h1>Fungerar bild och touch?</h1>
+          <InfoBox>Välj Ja om skärmen visar bilden normalt och touch fungerar över hela skärmen.</InfoBox>
+          <div className="claude-radio-list">
+            <button type="button" className={screenFaultMode === "works" ? "selected" : ""} onClick={setScreenWorks}>
+              <span aria-hidden />
+              <strong>Ja</strong>
+            </button>
+            <button type="button" className={screenFaultMode === "faults" ? "selected" : ""} onClick={setScreenHasFaults}>
+              <span aria-hidden />
+              <strong>Nej</strong>
+            </button>
+          </div>
+          {screenFaultMode === "faults" ? (
+            <div className="claude-dropdown-panel compact">
+              <div className="claude-checkbox-list compact">
+                {screenFunctionOptions.map((option) => {
+                  const selected = Boolean(answers.screenFunction[option.key]);
+                  return (
+                    <button key={option.key} type="button" className={selected ? "selected" : ""} onClick={() => toggleScreenFault(option.key)}>
+                      <span aria-hidden />
+                      <strong>{option.label}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          <Foot onBack={goBack} onNext={() => go("screen")} disabled={!displayValid} />
+        </>
+      );
+    }
 
     return (
       <>
@@ -851,8 +1351,6 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel }: UnifiedFl
           onBack={goBack}
           onNext={conditionScreens.next}
           disabled={!conditionScreens.value}
-          loading={currentStep === "back" && loadingResults}
-          nextLabel={currentStep === "back" ? "Beräkna bästa bud" : "Fortsätt"}
         />
       </>
     );
