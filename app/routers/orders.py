@@ -701,8 +701,8 @@ def _confirmation_html(order: OrderOut) -> str:
             <td align="center">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #cfd4cb;box-shadow:0 8px 26px rgba(35,45,38,0.06);">
                 <tr>
-                  <td class="tv-px" align="left" style="background:#05B87A;padding:24px 30px;text-align:left;">
-                    <img src="{logo_url}" width="150" alt="Televera" style="display:block;width:150px;max-width:150px;height:auto;border:0;outline:none;text-decoration:none;color:#ffffff;font-size:24px;font-weight:800;font-family:'Helvetica Neue',Arial,Helvetica,sans-serif;">
+                  <td class="tv-px" align="center" style="background:#05B87A;padding:24px 30px;text-align:center;">
+                    <img src="{logo_url}" width="150" alt="Televera" style="display:block;width:150px;max-width:150px;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none;color:#ffffff;font-size:24px;font-weight:800;font-family:'Helvetica Neue',Arial,Helvetica,sans-serif;">
                   </td>
                 </tr>
 
