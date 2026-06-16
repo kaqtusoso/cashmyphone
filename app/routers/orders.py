@@ -1,11 +1,13 @@
 import json
 import logging
 import smtplib
+from base64 import b64encode
 from asyncio import create_task, gather, to_thread
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from html import escape
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -17,6 +19,8 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["orders"])
+TELEVERA_LOGO_PATH = Path(__file__).resolve().parents[2] / "public" / "televera-logo-full.png"
+_TELEVERA_LOGO_DATA_URI: str | None = None
 
 SHEET_COLUMNS = [
     ("order_id", "Ordernummer", 190),
@@ -659,6 +663,17 @@ async def refresh_order_sheet_layout(x_api_key: str = Header(..., alias="X-API-K
         return IntegrationStatus(configured=True, ok=False, message=str(exc))
 
 
+def _televera_logo_data_uri() -> str:
+    global _TELEVERA_LOGO_DATA_URI
+    if _TELEVERA_LOGO_DATA_URI is None:
+        try:
+            _TELEVERA_LOGO_DATA_URI = "data:image/png;base64," + b64encode(TELEVERA_LOGO_PATH.read_bytes()).decode("ascii")
+        except OSError:
+            logger.warning("Televera-loggan saknas för ordermail: %s", TELEVERA_LOGO_PATH)
+            _TELEVERA_LOGO_DATA_URI = ""
+    return _TELEVERA_LOGO_DATA_URI
+
+
 def _confirmation_html(order: OrderOut) -> str:
     price = f"{order.price_sek:,}".replace(",", " ")
     customer_name = escape(order.customer.first_name)
@@ -668,49 +683,72 @@ def _confirmation_html(order: OrderOut) -> str:
     dealer_name = escape(order.dealer_name)
     shipping_label = escape(order.shipping_label)
     payment_label = escape(order.payment.label)
+    phone_model = f"{model} {storage}"
+    logo_src = _televera_logo_data_uri()
+    logo_markup = (
+        f'<img src="{logo_src}" width="120" alt="Televera" style="display:block;width:120px;height:auto;border:0;outline:none;text-decoration:none;">'
+        if logo_src
+        else '<div style="font-size:24px;font-weight:800;letter-spacing:0;color:#ffffff;">Televera</div>'
+    )
 
     return f"""
     <!doctype html>
     <html lang="sv">
-      <body style="margin:0;padding:0;background:#f4f7f5;color:#17211c;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f7f5;margin:0;padding:28px 12px;">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="x-apple-disable-message-reformatting">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>Televera - Orderbekräftelse</title>
+        <style>
+          @media only screen and (max-width: 600px) {{
+            .tv-px {{ padding-left: 20px !important; padding-right: 20px !important; }}
+            .tv-h1 {{ font-size: 24px !important; line-height: 30px !important; }}
+            .tv-price {{ font-size: 26px !important; }}
+            .tv-stack {{ display: block !important; width: 100% !important; }}
+            .tv-stack-r {{
+              text-align: left !important;
+              padding-top: 14px !important;
+              border-top: 1px solid #c0e6d2;
+              margin-top: 4px;
+            }}
+            .tv-step-sub {{ font-size: 12px !important; }}
+          }}
+        </style>
+      </head>
+      <body style="margin:0;padding:0;background:#edf0ea;color:#2f322c;font-family:'Helvetica Neue',Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#edf0ea;font-size:1px;line-height:1px;">
+          Tack {customer_name}, vi har tagit emot din order {order_id}. Uppskattat pris {price} kr.
+        </div>
+
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#edf0ea;margin:0;padding:30px 12px;">
           <tr>
             <td align="center">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #dfe7e2;box-shadow:0 10px 34px rgba(23,33,28,0.08);">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #cfd4cb;box-shadow:0 8px 26px rgba(35,45,38,0.06);">
                 <tr>
-                  <td style="background:#073d2b;padding:26px 28px;color:#ffffff;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                      <tr>
-                        <td>
-                          <div style="font-size:24px;font-weight:800;letter-spacing:0;color:#ffffff;">Televera</div>
-                          <div style="margin-top:6px;font-size:14px;line-height:20px;color:#bfe9d7;">Orderbekräftelse</div>
-                        </td>
-                        <td align="right" style="vertical-align:top;">
-                          <span style="display:inline-block;background:#00b87a;color:#073d2b;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;">Mottagen</span>
-                        </td>
-                      </tr>
-                    </table>
+                  <td class="tv-px" style="background:#05B87A;padding:24px 30px;">
+                    {logo_markup}
                   </td>
                 </tr>
 
                 <tr>
-                  <td style="padding:30px 28px 12px;">
-                    <h1 style="margin:0 0 12px;font-size:28px;line-height:34px;color:#10271f;font-weight:800;">Tack {customer_name}, vi har tagit emot din order.</h1>
-                    <p style="margin:0;color:#54635d;font-size:16px;line-height:25px;">Vi har registrerat att du vill sälja din <strong style="color:#17211c;">{model} {storage}</strong>. Spara ordernumret nedan om du behöver kontakta oss.</p>
+                  <td class="tv-px" style="padding:28px 30px 8px;">
+                    <h1 class="tv-h1" style="margin:0;font-size:26px;line-height:31px;color:#2f322c;font-weight:700;letter-spacing:-0.02em;">Tack {customer_name}, vi har tagit emot din order.</h1>
+                    <p style="margin:14px 0 0;color:#8b918a;font-size:15px;line-height:24px;">Vi har registrerat att du vill sälja din <strong style="color:#2f322c;font-weight:600;">{phone_model}</strong>. Spara ordernumret nedan om du behöver kontakta oss.</p>
                   </td>
                 </tr>
 
                 <tr>
-                  <td style="padding:18px 28px 8px;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f0fbf6;border:1px solid #bdebd6;border-radius:14px;">
+                  <td class="tv-px" style="padding:18px 30px 6px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#e7f6ee;border:1px solid #c0e6d2;border-radius:14px;">
                       <tr>
-                        <td style="padding:18px 18px;">
-                          <div style="font-size:13px;text-transform:uppercase;color:#4f6b5f;font-weight:700;letter-spacing:.04em;">Ordernummer</div>
-                          <div style="margin-top:6px;font-size:22px;line-height:28px;color:#073d2b;font-weight:800;">{order_id}</div>
+                        <td class="tv-stack" width="50%" style="padding:18px 20px;vertical-align:top;">
+                          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#5c7d6b;font-family:'Courier New',Courier,monospace;">Ordernummer</div>
+                          <div style="margin-top:7px;font-size:20px;line-height:24px;color:#0b5538;font-weight:700;font-family:'Courier New',Courier,monospace;letter-spacing:-0.01em;">{order_id}</div>
                         </td>
-                        <td align="right" style="padding:18px 18px;">
-                          <div style="font-size:13px;text-transform:uppercase;color:#4f6b5f;font-weight:700;letter-spacing:.04em;">Uppskattat pris</div>
-                          <div style="margin-top:6px;font-size:24px;line-height:30px;color:#00a66f;font-weight:800;">{price} kr</div>
+                        <td class="tv-stack tv-stack-r" width="50%" align="right" style="padding:18px 20px;vertical-align:top;text-align:right;">
+                          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#5c7d6b;font-family:'Courier New',Courier,monospace;">Uppskattat pris</div>
+                          <div class="tv-price" style="margin-top:5px;font-size:28px;line-height:32px;color:#15bd80;font-weight:800;letter-spacing:-0.02em;">{price} kr</div>
                         </td>
                       </tr>
                     </table>
@@ -718,52 +756,74 @@ def _confirmation_html(order: OrderOut) -> str:
                 </tr>
 
                 <tr>
-                  <td style="padding:16px 28px 8px;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                  <td class="tv-px" style="padding:14px 30px 4px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
                       <tr>
-                        <td style="padding:13px 0;border-bottom:1px solid #edf2ef;color:#63716b;font-size:14px;">Mobil</td>
-                        <td align="right" style="padding:13px 0;border-bottom:1px solid #edf2ef;color:#17211c;font-size:15px;font-weight:700;">{model} {storage}</td>
+                        <td style="padding:12px 0;border-bottom:1px solid #e7eae3;color:#8b918a;font-size:14px;">Mobil</td>
+                        <td align="right" style="padding:12px 0;border-bottom:1px solid #e7eae3;color:#2f322c;font-size:14px;font-weight:600;">{phone_model}</td>
                       </tr>
                       <tr>
-                        <td style="padding:13px 0;border-bottom:1px solid #edf2ef;color:#63716b;font-size:14px;">Köpare</td>
-                        <td align="right" style="padding:13px 0;border-bottom:1px solid #edf2ef;color:#17211c;font-size:15px;font-weight:700;">{dealer_name}</td>
+                        <td style="padding:12px 0;border-bottom:1px solid #e7eae3;color:#8b918a;font-size:14px;">Köpare</td>
+                        <td align="right" style="padding:12px 0;border-bottom:1px solid #e7eae3;color:#2f322c;font-size:14px;font-weight:600;">{dealer_name}</td>
                       </tr>
                       <tr>
-                        <td style="padding:13px 0;border-bottom:1px solid #edf2ef;color:#63716b;font-size:14px;">Frakt</td>
-                        <td align="right" style="padding:13px 0;border-bottom:1px solid #edf2ef;color:#17211c;font-size:15px;font-weight:700;">{shipping_label}</td>
+                        <td style="padding:12px 0;border-bottom:1px solid #e7eae3;color:#8b918a;font-size:14px;">Frakt</td>
+                        <td align="right" style="padding:12px 0;border-bottom:1px solid #e7eae3;color:#2f322c;font-size:14px;font-weight:600;">{shipping_label}</td>
                       </tr>
                       <tr>
-                        <td style="padding:13px 0;color:#63716b;font-size:14px;">Betalning</td>
-                        <td align="right" style="padding:13px 0;color:#17211c;font-size:15px;font-weight:700;">{payment_label}</td>
+                        <td style="padding:12px 0;color:#8b918a;font-size:14px;">Betalning</td>
+                        <td align="right" style="padding:12px 0;color:#2f322c;font-size:14px;font-weight:600;">{payment_label}</td>
                       </tr>
                     </table>
                   </td>
                 </tr>
 
                 <tr>
-                  <td style="padding:20px 28px 26px;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fbfcfb;border:1px solid #e5ece8;border-radius:14px;">
+                  <td class="tv-px" style="padding:16px 30px 30px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fafbf9;border:1px solid #e7eae3;border-radius:14px;">
                       <tr>
-                        <td style="padding:20px 20px;">
-                          <h2 style="margin:0 0 14px;font-size:20px;line-height:26px;color:#10271f;">Vad händer nu?</h2>
-                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                        <td style="padding:18px 18px 22px;">
+                          <div style="font-size:17px;line-height:22px;color:#2f322c;font-weight:700;">Vad händer nu?</div>
+
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:18px;">
                             <tr>
-                              <td width="30" style="vertical-align:top;padding:0 0 12px;">
-                                <div style="width:22px;height:22px;border-radius:999px;background:#00b87a;color:#ffffff;text-align:center;line-height:22px;font-size:13px;font-weight:700;">1</div>
+                              <td width="33.33%" valign="top" style="text-align:center;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+                                  <td style="vertical-align:top;"><div style="height:14px;font-size:0;line-height:0;">&nbsp;</div></td>
+                                  <td width="44" align="center" style="vertical-align:top;">
+                                    <div style="width:38px;height:38px;border-radius:19px;background:#15bd80;color:#ffffff;text-align:center;line-height:38px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">1</div>
+                                  </td>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                </tr></table>
                               </td>
-                              <td style="padding:0 0 12px;color:#54635d;font-size:15px;line-height:22px;">Du får fraktinstruktioner och skickar mobilen när du är redo.</td>
+                              <td width="33.33%" valign="top" style="text-align:center;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                  <td width="44" align="center" style="vertical-align:top;">
+                                    <div style="width:38px;height:38px;border-radius:19px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">2</div>
+                                  </td>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                </tr></table>
+                              </td>
+                              <td width="33.33%" valign="top" style="text-align:center;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                  <td width="44" align="center" style="vertical-align:top;">
+                                    <div style="width:38px;height:38px;border-radius:19px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">3</div>
+                                  </td>
+                                  <td style="vertical-align:top;"><div style="height:14px;font-size:0;line-height:0;">&nbsp;</div></td>
+                                </tr></table>
+                              </td>
                             </tr>
                             <tr>
-                              <td width="30" style="vertical-align:top;padding:0 0 12px;">
-                                <div style="width:22px;height:22px;border-radius:999px;background:#00b87a;color:#ffffff;text-align:center;line-height:22px;font-size:13px;font-weight:700;">2</div>
-                              </td>
-                              <td style="padding:0 0 12px;color:#54635d;font-size:15px;line-height:22px;">{dealer_name} kontrollerar mobilen när den kommit fram.</td>
+                              <td align="center" style="padding-top:12px;font-size:14px;line-height:18px;color:#2f322c;font-weight:700;">Skicka in</td>
+                              <td align="center" style="padding-top:12px;font-size:14px;line-height:18px;color:#2f322c;font-weight:700;">Kontroll</td>
+                              <td align="center" style="padding-top:12px;font-size:14px;line-height:18px;color:#2f322c;font-weight:700;">Pengar</td>
                             </tr>
                             <tr>
-                              <td width="30" style="vertical-align:top;">
-                                <div style="width:22px;height:22px;border-radius:999px;background:#00b87a;color:#ffffff;text-align:center;line-height:22px;font-size:13px;font-weight:700;">3</div>
-                              </td>
-                              <td style="color:#54635d;font-size:15px;line-height:22px;">Utbetalning görs enligt ditt valda betalningssätt.</td>
+                              <td align="center" class="tv-step-sub" style="padding:5px 8px 0;font-size:12.5px;line-height:17px;color:#8b918a;">Du får fraktsedeln och postar mobilen.</td>
+                              <td align="center" class="tv-step-sub" style="padding:5px 8px 0;font-size:12.5px;line-height:17px;color:#8b918a;">{dealer_name} testar mobilen vid ankomst.</td>
+                              <td align="center" class="tv-step-sub" style="padding:5px 8px 0;font-size:12.5px;line-height:17px;color:#8b918a;">Utbetalning via {payment_label} direkt efter OK.</td>
                             </tr>
                           </table>
                         </td>
@@ -773,13 +833,13 @@ def _confirmation_html(order: OrderOut) -> str:
                 </tr>
 
                 <tr>
-                  <td style="padding:0 28px 30px;color:#63716b;font-size:14px;line-height:22px;">
+                  <td class="tv-px" style="padding:0 30px 30px;color:#8b918a;font-size:14px;line-height:22px;">
                     Hälsningar,<br>
-                    <strong style="color:#17211c;">Televera</strong>
+                    <strong style="color:#2f322c;font-weight:600;">Televera</strong>
                   </td>
                 </tr>
               </table>
-              <div style="max-width:640px;margin:16px auto 0;color:#7a8882;font-size:12px;line-height:18px;text-align:center;">
+              <div style="max-width:600px;margin:14px auto 0;color:#aeb4ac;font-size:12px;line-height:18px;text-align:center;font-family:'Courier New',Courier,monospace;letter-spacing:0.03em;">
                 Detta är en automatisk orderbekräftelse från Televera.
               </div>
             </td>
