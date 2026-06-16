@@ -18,6 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
 INDEX_HTML = DIST_DIR / "index.html"
+PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 
 
 @asynccontextmanager
@@ -54,7 +55,7 @@ app.include_router(orders.router)
 
 @app.get("/health", tags=["system"])
 async def health():
-    return {"status": "ok", "version": "1.0.0", "order_email_template": "televera-2026-06-16-mobile-steps"}
+    return {"status": "ok", "version": "1.0.0", "order_email_template": "televera-2026-06-16-hosted-logo"}
 
 
 @app.get("/", tags=["system"])
@@ -77,6 +78,11 @@ async def root():
             "/api/import-prices/{retailer}",
         ],
     }
+
+
+@app.get("/mail-assets/televera-logo-full.png", include_in_schema=False)
+async def televera_email_logo():
+    return FileResponse(PUBLIC_DIR / "televera-logo-full.png", media_type="image/png")
 
 
 if (DIST_DIR / "assets").exists():

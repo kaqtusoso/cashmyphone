@@ -669,6 +669,7 @@ def _confirmation_html(order: OrderOut) -> str:
     shipping_label = escape(order.shipping_label)
     payment_label = escape(order.payment.label)
     phone_model = f"{model} {storage}"
+    logo_url = f"{settings.public_base_url.rstrip('/')}/mail-assets/televera-logo-full.png"
 
     return f"""
     <!doctype html>
@@ -701,7 +702,7 @@ def _confirmation_html(order: OrderOut) -> str:
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #cfd4cb;box-shadow:0 8px 26px rgba(35,45,38,0.06);">
                 <tr>
                   <td class="tv-px" align="left" style="background:#05B87A;padding:24px 30px;text-align:left;">
-                    <div style="font-size:24px;line-height:30px;font-weight:800;letter-spacing:0;color:#ffffff;font-family:'Helvetica Neue',Arial,Helvetica,sans-serif;">Televera</div>
+                    <img src="{logo_url}" width="150" alt="Televera" style="display:block;width:150px;max-width:150px;height:auto;border:0;outline:none;text-decoration:none;color:#ffffff;font-size:24px;font-weight:800;font-family:'Helvetica Neue',Arial,Helvetica,sans-serif;">
                   </td>
                 </tr>
 

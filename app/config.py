@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     smtp_reply_to: str = ""
     smtp_use_tls: bool = True
     order_submission_timeout_seconds: int = 10
+    public_base_url: str = "https://cashmyphone-production.up.railway.app"
 
     @property
     def origins_list(self) -> List[str]:
