@@ -1,13 +1,11 @@
 import json
 import logging
 import smtplib
-from base64 import b64encode
 from asyncio import create_task, gather, to_thread
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from html import escape
-from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -19,8 +17,6 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["orders"])
-TELEVERA_LOGO_PATH = Path(__file__).resolve().parents[2] / "public" / "televera-logo-full.png"
-_TELEVERA_LOGO_DATA_URI: str | None = None
 
 SHEET_COLUMNS = [
     ("order_id", "Ordernummer", 190),
@@ -663,17 +659,6 @@ async def refresh_order_sheet_layout(x_api_key: str = Header(..., alias="X-API-K
         return IntegrationStatus(configured=True, ok=False, message=str(exc))
 
 
-def _televera_logo_data_uri() -> str:
-    global _TELEVERA_LOGO_DATA_URI
-    if _TELEVERA_LOGO_DATA_URI is None:
-        try:
-            _TELEVERA_LOGO_DATA_URI = "data:image/png;base64," + b64encode(TELEVERA_LOGO_PATH.read_bytes()).decode("ascii")
-        except OSError:
-            logger.warning("Televera-loggan saknas för ordermail: %s", TELEVERA_LOGO_PATH)
-            _TELEVERA_LOGO_DATA_URI = ""
-    return _TELEVERA_LOGO_DATA_URI
-
-
 def _confirmation_html(order: OrderOut) -> str:
     price = f"{order.price_sek:,}".replace(",", " ")
     customer_name = escape(order.customer.first_name)
@@ -684,12 +669,6 @@ def _confirmation_html(order: OrderOut) -> str:
     shipping_label = escape(order.shipping_label)
     payment_label = escape(order.payment.label)
     phone_model = f"{model} {storage}"
-    logo_src = _televera_logo_data_uri()
-    logo_markup = (
-        f'<img src="{logo_src}" width="120" alt="Televera" style="display:block;width:120px;height:auto;border:0;outline:none;text-decoration:none;">'
-        if logo_src
-        else '<div style="font-size:24px;font-weight:800;letter-spacing:0;color:#ffffff;">Televera</div>'
-    )
 
     return f"""
     <!doctype html>
@@ -699,19 +678,14 @@ def _confirmation_html(order: OrderOut) -> str:
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="x-apple-disable-message-reformatting">
         <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="color-scheme" content="light dark">
+        <meta name="supported-color-schemes" content="light dark">
         <title>Televera - Orderbekräftelse</title>
         <style>
           @media only screen and (max-width: 600px) {{
             .tv-px {{ padding-left: 20px !important; padding-right: 20px !important; }}
             .tv-h1 {{ font-size: 24px !important; line-height: 30px !important; }}
             .tv-price {{ font-size: 26px !important; }}
-            .tv-stack {{ display: block !important; width: 100% !important; }}
-            .tv-stack-r {{
-              text-align: left !important;
-              padding-top: 14px !important;
-              border-top: 1px solid #c0e6d2;
-              margin-top: 4px;
-            }}
             .tv-step-sub {{ font-size: 12px !important; }}
           }}
         </style>
@@ -726,8 +700,8 @@ def _confirmation_html(order: OrderOut) -> str:
             <td align="center">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #cfd4cb;box-shadow:0 8px 26px rgba(35,45,38,0.06);">
                 <tr>
-                  <td class="tv-px" style="background:#05B87A;padding:24px 30px;">
-                    {logo_markup}
+                  <td class="tv-px" align="left" style="background:#05B87A;padding:24px 30px;text-align:left;">
+                    <div style="font-size:24px;line-height:30px;font-weight:800;letter-spacing:0;color:#ffffff;font-family:'Helvetica Neue',Arial,Helvetica,sans-serif;">Televera</div>
                   </td>
                 </tr>
 
@@ -740,13 +714,20 @@ def _confirmation_html(order: OrderOut) -> str:
 
                 <tr>
                   <td class="tv-px" style="padding:18px 30px 6px;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#e7f6ee;border:1px solid #c0e6d2;border-radius:14px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#e7f6ee;border:1px solid #c0e6d2;border-radius:14px;overflow:hidden;">
                       <tr>
-                        <td class="tv-stack" width="50%" style="padding:18px 20px;vertical-align:top;">
+                        <td style="padding:18px 20px 16px;vertical-align:top;">
                           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#5c7d6b;font-family:'Courier New',Courier,monospace;">Ordernummer</div>
                           <div style="margin-top:7px;font-size:20px;line-height:24px;color:#0b5538;font-weight:700;font-family:'Courier New',Courier,monospace;letter-spacing:-0.01em;">{order_id}</div>
                         </td>
-                        <td class="tv-stack tv-stack-r" width="50%" align="right" style="padding:18px 20px;vertical-align:top;text-align:right;">
+                      </tr>
+                      <tr>
+                        <td style="padding:0 20px;">
+                          <div style="height:1px;background:#c0e6d2;font-size:0;line-height:0;">&nbsp;</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:16px 20px 18px;vertical-align:top;text-align:left;">
                           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#5c7d6b;font-family:'Courier New',Courier,monospace;">Uppskattat pris</div>
                           <div class="tv-price" style="margin-top:5px;font-size:28px;line-height:32px;color:#15bd80;font-weight:800;letter-spacing:-0.02em;">{price} kr</div>
                         </td>
@@ -780,7 +761,7 @@ def _confirmation_html(order: OrderOut) -> str:
 
                 <tr>
                   <td class="tv-px" style="padding:16px 30px 30px;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fafbf9;border:1px solid #e7eae3;border-radius:14px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f1f3f2;border:1px solid #d9dedb;border-radius:14px;">
                       <tr>
                         <td style="padding:18px 18px 22px;">
                           <div style="font-size:17px;line-height:22px;color:#2f322c;font-weight:700;">Vad händer nu?</div>
@@ -793,21 +774,21 @@ def _confirmation_html(order: OrderOut) -> str:
                                   <td width="44" align="center" style="vertical-align:top;">
                                     <div style="width:38px;height:38px;border-radius:19px;background:#15bd80;color:#ffffff;text-align:center;line-height:38px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">1</div>
                                   </td>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
                                 </tr></table>
                               </td>
                               <td width="33.33%" valign="top" style="text-align:center;">
                                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
                                   <td width="44" align="center" style="vertical-align:top;">
                                     <div style="width:38px;height:38px;border-radius:19px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">2</div>
                                   </td>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
                                 </tr></table>
                               </td>
                               <td width="33.33%" valign="top" style="text-align:center;">
                                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #e7eae3;font-size:0;line-height:0;">&nbsp;</div></td>
+                                  <td style="vertical-align:top;"><div style="height:14px;border-bottom:3px solid #d9dedb;font-size:0;line-height:0;">&nbsp;</div></td>
                                   <td width="44" align="center" style="vertical-align:top;">
                                     <div style="width:38px;height:38px;border-radius:19px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">3</div>
                                   </td>
