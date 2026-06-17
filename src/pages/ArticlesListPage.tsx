@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { ArrowLeft, ArrowRight, BookOpen, Clock3, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { articleSummaries } from "@/data/article-summaries";
+import { DEFAULT_OG_IMAGE, DEFAULT_OG_IMAGE_ALT, SITE_NAME, SITE_URL } from "@/utils/seo";
 
 const ArticlesListPage = () => {
   useEffect(() => {
@@ -15,7 +16,7 @@ const ArticlesListPage = () => {
     itemListElement: articleSummaries.map((a, i) => ({
       "@type": "ListItem",
       position: i + 1,
-      url: `https://televera.se/artikel/${a.slug}`,
+      url: `${SITE_URL}/artikel/${a.slug}`,
       name: a.title,
     })),
   };
@@ -31,7 +32,25 @@ const ArticlesListPage = () => {
           content="Läs våra guider om att sälja begagnade mobiler – allt från värdering och prisskillnader till praktiska tips innan du säljer."
         />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://televera.se/artiklar" />
+        <link rel="canonical" href={`${SITE_URL}/artiklar`} />
+        <meta property="og:site_name" content={SITE_NAME} />
+        <meta property="og:locale" content="sv_SE" />
+        <meta property="og:title" content="Guider om att sälja mobil | Televera.se" />
+        <meta
+          property="og:description"
+          content="Guider om värdering, trygg försäljning och hur du får bättre betalt när du säljer din iPhone."
+        />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={`${SITE_URL}/artiklar`} />
+        <meta property="og:image" content={DEFAULT_OG_IMAGE} />
+        <meta property="og:image:alt" content={DEFAULT_OG_IMAGE_ALT} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Guider om att sälja mobil | Televera.se" />
+        <meta
+          name="twitter:description"
+          content="Praktiska guider för dig som vill sälja din iPhone tryggt och förstå vad den är värd."
+        />
+        <meta name="twitter:image" content={DEFAULT_OG_IMAGE} />
         <script type="application/ld+json">{JSON.stringify(itemListJsonLd)}</script>
       </Helmet>
 

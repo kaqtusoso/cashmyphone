@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Building2, Mail, Phone } from "lucide-react";
+import { DEFAULT_OG_IMAGE, DEFAULT_OG_IMAGE_ALT, SITE_NAME, SITE_URL } from "@/utils/seo";
 
 type PolicyType = "terms" | "privacy" | "cookies";
 
@@ -196,10 +197,19 @@ const PolicyPage = ({ type }: { type: PolicyType }) => {
         <title>{policy.title} - Televera.se</title>
         <meta name="description" content={policy.description} />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href={`https://televera.se${policy.canonicalPath}`} />
+        <link rel="canonical" href={`${SITE_URL}${policy.canonicalPath}`} />
+        <meta property="og:site_name" content={SITE_NAME} />
+        <meta property="og:locale" content="sv_SE" />
         <meta property="og:title" content={`${policy.title} - Televera.se`} />
         <meta property="og:description" content={policy.description} />
-        <meta property="og:url" content={`https://televera.se${policy.canonicalPath}`} />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={`${SITE_URL}${policy.canonicalPath}`} />
+        <meta property="og:image" content={DEFAULT_OG_IMAGE} />
+        <meta property="og:image:alt" content={DEFAULT_OG_IMAGE_ALT} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={`${policy.title} - Televera.se`} />
+        <meta name="twitter:description" content={policy.description} />
+        <meta name="twitter:image" content={DEFAULT_OG_IMAGE} />
       </Helmet>
 
       <main className="mx-auto max-w-4xl px-5 py-10 md:px-8 md:py-16">

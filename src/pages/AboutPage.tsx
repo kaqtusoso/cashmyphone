@@ -4,12 +4,13 @@ import { Helmet } from "react-helmet-async";
 import { ArrowLeft, Building2, Mail, Phone } from "lucide-react";
 import pascalImg from "@/assets/pascal.webp";
 import televeraLogo from "@/assets/televera-logo-full.png";
+import { DEFAULT_OG_IMAGE, DEFAULT_OG_IMAGE_ALT, SITE_NAME, SITE_URL } from "@/utils/seo";
 
 const ABOUT_JSON_LD = {
   "@context": "https://schema.org",
   "@type": "AboutPage",
   name: "Om Televera.se",
-  url: "https://televera.se/om-oss",
+  url: `${SITE_URL}/om-oss`,
   description:
     "Om Televera.se – en gratis svensk tjänst som jämför vad uppköpare betalar för din begagnade mobil. Grundad av Pascal.",
 };
@@ -28,13 +29,25 @@ const AboutPage = () => {
           content="Lär känna personen bakom Televera.se – Sveriges gratis tjänst för att jämföra vad uppköpare betalar för din mobil."
         />
         <meta name="robots" content="index, follow" />
-        <link rel="canonical" href="https://televera.se/om-oss" />
+        <link rel="canonical" href={`${SITE_URL}/om-oss`} />
+        <meta property="og:site_name" content={SITE_NAME} />
+        <meta property="og:locale" content="sv_SE" />
         <meta property="og:title" content="Om oss – Televera.se" />
         <meta
           property="og:description"
           content="Historien bakom Televera – grundad av Pascal för att hjälpa svenskar få bäst betalt för sin gamla mobil."
         />
-        <meta property="og:url" content="https://televera.se/om-oss" />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={`${SITE_URL}/om-oss`} />
+        <meta property="og:image" content={DEFAULT_OG_IMAGE} />
+        <meta property="og:image:alt" content={DEFAULT_OG_IMAGE_ALT} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Om oss – Televera.se" />
+        <meta
+          name="twitter:description"
+          content="Historien bakom Televera – en svensk jämförelsetjänst för dig som vill sälja din iPhone tryggt."
+        />
+        <meta name="twitter:image" content={DEFAULT_OG_IMAGE} />
         <script type="application/ld+json">{JSON.stringify(ABOUT_JSON_LD)}</script>
       </Helmet>
 

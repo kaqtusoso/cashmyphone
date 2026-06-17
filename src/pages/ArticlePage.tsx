@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, ArrowRight, BookOpen, Clock3, Sparkles } from "lucide-react";
 import { articleSummaries } from "@/data/article-summaries";
+import { DEFAULT_OG_IMAGE, DEFAULT_OG_IMAGE_ALT, SITE_NAME, SITE_URL } from "@/utils/seo";
 
 const estimateReadingMinutes = (content: string) => {
   const words = content.trim().split(/\s+/).filter(Boolean).length;
@@ -32,7 +33,7 @@ const ArticlePage = () => {
     );
   }
 
-  const url = `https://televera.se/artikel/${article.slug}`;
+  const url = `${SITE_URL}/artikel/${article.slug}`;
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -42,7 +43,7 @@ const ArticlePage = () => {
     publisher: {
       "@type": "Organization",
       name: "Televera",
-      url: "https://televera.se",
+      url: SITE_URL,
     },
   };
   const readingMinutes = estimateReadingMinutes(article.content);
@@ -52,9 +53,18 @@ const ArticlePage = () => {
       <Helmet>
         <title>{article.title} | Televera.se</title>
         <meta name="description" content={article.ingress} />
+        <meta property="og:site_name" content={SITE_NAME} />
+        <meta property="og:locale" content="sv_SE" />
         <meta property="og:title" content={`${article.title} | Televera.se`} />
         <meta property="og:description" content={article.ingress} />
         <meta property="og:url" content={url} />
+        <meta property="og:type" content="article" />
+        <meta property="og:image" content={DEFAULT_OG_IMAGE} />
+        <meta property="og:image:alt" content={DEFAULT_OG_IMAGE_ALT} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={`${article.title} | Televera.se`} />
+        <meta name="twitter:description" content={article.ingress} />
+        <meta name="twitter:image" content={DEFAULT_OG_IMAGE} />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href={url} />
         <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
