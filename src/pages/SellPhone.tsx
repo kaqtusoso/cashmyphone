@@ -12,7 +12,7 @@ const SellPhone = () => {
   const canonicalPath = `/salja/${modelSlug}`;
   const canonicalUrl = absoluteUrl(canonicalPath);
   const title = `Sälj ${model} tryggt – jämför priser | Televera`;
-  const description = `Jämför vad svenska uppköpare betalar för din ${model}. Se bästa erbjudandet, slipp privatmarknadsstrul och sälj tryggt online.`;
+  const description = `Jämför vad svenska uppköpare betalar för din ${model}. Se bästa erbjudandet och sälj enkelt och tryggt online.`;
 
   if (!model) return <Navigate to="/" replace />;
 

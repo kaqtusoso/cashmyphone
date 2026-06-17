@@ -8,7 +8,7 @@ const HOME_JSON_LD = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
   name: "Televera",
-  description: "Jämför vad svenska uppköpare betalar för din iPhone och sälj tryggt utan privatmarknadsstrul.",
+  description: "Jämför vad svenska uppköpare betalar för din iPhone och sälj enkelt och tryggt.",
   url: SITE_URL,
   applicationCategory: "FinanceApplication",
 };
@@ -20,7 +20,7 @@ const Index = () => {
         <title>Televera – Jämför priser och sälj din iPhone tryggt</title>
         <meta
           name="description"
-          content="Jämför erbjudanden från svenska uppköpare och sälj din iPhone tryggt utan privatmarknadsstrul. Se vem som betalar bäst på ett ställe."
+          content="Jämför erbjudanden från svenska uppköpare och sälj din iPhone enkelt och tryggt. Se vem som betalar bäst på ett ställe."
         />
         <meta name="robots" content="index, follow" />
         <link rel="canonical" href={SITE_URL} />
@@ -29,7 +29,7 @@ const Index = () => {
         <meta property="og:title" content="Televera – Jämför priser och sälj din iPhone tryggt" />
         <meta
           property="og:description"
-          content="Se vem som betalar bäst för din iPhone och slipp prutare, möten och osäkra privatköp."
+          content="Se vem som betalar bäst för din iPhone utan att själv lägga upp annonser och boka möten."
         />
         <meta property="og:type" content="website" />
         <meta property="og:url" content={SITE_URL} />
