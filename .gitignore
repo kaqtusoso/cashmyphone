@@ -4,6 +4,8 @@ __pycache__/
 .env
 .env.local
 data/
+!src/data/
+!src/data/**
 .DS_Store
 node_modules/
 dist/
@@ -11,3 +13,19 @@ dist-ssr/
 logs/
 *.log
 *.local
+memory/
+
+# Imported/generated workspaces and design handoff artifacts
+frontend/
+*.zip
+phonehero_assets/
+
+# One-off asset import/renaming scripts
+fix_*_heroes*.py
+fix_missing_heroes_final.py
+group_iphone_*.py
+phonehero_asset_downloader*.py
+phonehero_assets_full_fixed.py
+rename_generation_files.py
+rename_phonehero_assets*.py
+zijUdDWL
