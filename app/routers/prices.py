@@ -6,10 +6,31 @@ from typing import Optional, List, Dict
 from pydantic import BaseModel
 from ..database import get_db
 from ..models import BuybackPrice, PriceOut, BestOffer, ScrapeStatusOut
-from ..pricing.crosswalk import FormAnswers, all_conditions
+from ..pricing.crosswalk import FormAnswers, all_conditions, phonehero_conditions
 from ..config import settings
 
 router = APIRouter(prefix="/api", tags=["prices"])
+
+
+def _normalize_iphone_model(model: str) -> str:
+    normalized = " ".join((model or "").strip().split())
+    if normalized and not normalized.lower().startswith("iphone"):
+        normalized = f"iPhone {normalized}"
+    return normalized
+
+
+def _phonehero_ignores_battery(model: str) -> bool:
+    normalized = _normalize_iphone_model(model)
+    if normalized.lower() == "iphone air":
+        return True
+    parts = normalized.split()
+    if len(parts) < 2 or parts[0].lower() != "iphone":
+        return False
+    try:
+        generation = int(parts[1])
+    except ValueError:
+        return False
+    return generation >= 16
 
 
 def _active_prices(model=None, storage_gb=None, condition=None, retailer=None):
@@ -168,9 +189,7 @@ async def get_quote(
     db: AsyncSession = Depends(get_db),
 ):
     # 1. Normalisera modellnamnet (lägg till "iPhone " om det saknas)
-    model_normalized = req.model.strip()
-    if not model_normalized.lower().startswith("iphone"):
-        model_normalized = f"iPhone {model_normalized}"
+    model_normalized = _normalize_iphone_model(req.model)
 
     # 2. Bygg FormAnswers och slå upp condition-nycklar
     answers = FormAnswers(
@@ -184,6 +203,8 @@ async def get_quote(
         is_water_damaged=req.is_water_damaged,
     )
     conditions = all_conditions(answers)  # {retailer: condition_key | None}
+    if _phonehero_ignores_battery(model_normalized):
+        conditions["phonehero"] = phonehero_conditions(answers, ignore_battery=True)
 
     # 3. Hämta det bästa (högsta) priset per återförsäljare i ett enda DB-anrop
     #    Bygg OR-filter: (retailer='swappie' AND condition='…') OR …

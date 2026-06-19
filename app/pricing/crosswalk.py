@@ -162,7 +162,7 @@ _PHONEHERO_VISUAL: Dict[str, str] = {
     "MODERATE":   "ms",
 }
 
-def phonehero_conditions(a: FormAnswers) -> List[str]:
+def phonehero_conditions(a: FormAnswers, *, ignore_battery: bool = False) -> List[str]:
     """
     Returnerar möjliga PhoneHero-nycklar.
 
@@ -198,10 +198,14 @@ def phonehero_conditions(a: FormAnswers) -> List[str]:
 
     battery = "low" if a.is_battery_low else "ok"
 
+    batteryless = f"dev={device}|d={defect}|c={critical}"
+    if ignore_battery:
+        return [batteryless]
+
     return [
         f"s={screen}|b={body}|d={defect}|c={critical}|bt={battery}",
         f"dev={device}|d={defect}|c={critical}|bt={battery}",
-        f"dev={device}|d={defect}|c={critical}",
+        batteryless,
     ]
 
 
@@ -258,9 +262,11 @@ def fixiphone_se_condition(a: FormAnswers) -> str:
         deduction += 45
 
     visual_wear = _worst(a.screen_surface, a.sides_surface)
-    if visual_wear == "ALMOST_NEW":
+    # Fixiphone skiljer bara på "Nej", "Omärkbar" och "Märkbar" för
+    # repor/bucklor. Lätta repor i Televeras flöde motsvarar omärkbara spår.
+    if visual_wear in {"ALMOST_NEW", "GOOD"}:
         deduction += 10
-    elif visual_wear in {"GOOD", "MODERATE"}:
+    elif visual_wear == "MODERATE":
         deduction += 20
 
     if a.is_glass_broken or a.back_surface == "MODERATE":
