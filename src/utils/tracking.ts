@@ -82,14 +82,25 @@ const attributionProperties = () => {
   return props;
 };
 
+const isDebugMode = () => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("debug_mode") === "true" || params.get("debugMode") === "true";
+  } catch {
+    return false;
+  }
+};
+
 export const trackEvent = (eventName: string, properties: TrackingProperties = {}) => {
   const payload = compactProperties({
     ...attributionProperties(),
     ...properties,
+    debug_mode: isDebugMode() ? true : undefined,
     path: window.location.pathname,
   });
 
-  window.dataLayer?.push({ event: eventName, ...payload });
+  window.dataLayer = window.dataLayer ?? [];
+  window.dataLayer.push({ event: eventName, ...payload });
   window.gtag?.("event", eventName, payload);
   window.fbq?.("trackCustom", eventName, payload);
 };

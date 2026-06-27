@@ -91,6 +91,9 @@ const SLUG_TO_STEP = Object.fromEntries(
   Object.entries(STEP_SLUGS).map(([step, slug]) => [slug, step]),
 ) as Record<string, Exclude<StepKey, "model">>;
 
+const quoteStepEventName = (step: Exclude<StepKey, "model" | "results">, action: "viewed" | "completed") =>
+  `quote_step_${step}_${action}`;
+
 const LEGACY_FORM_QUERY = "legacyForm";
 
 const partnerLogos = [
@@ -681,27 +684,34 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
       });
       return;
     }
-    trackStepView("quote_step_viewed", {
+    const stepPayload = {
       funnel: "quote",
       step,
       step_label: STEP_LABELS[step],
       step_index: stepIndex(step) + 1,
       model,
       storage,
-    });
+    };
+    trackStepView("quote_step_viewed", stepPayload);
+    trackStepView(quoteStepEventName(step, "viewed"), stepPayload);
   }, [model, results, step, storage]);
 
   const trackStepCompleted = (completedStep: StepKey, extra: Record<string, string | number | boolean | null | undefined> = {}) => {
     if (completedStep === "model") return;
-    trackEvent("quote_step_completed", {
+    const stepPayload = {
       funnel: "quote",
       step: completedStep,
       step_index: isFlowStep(completedStep) ? stepIndex(completedStep) + 1 : undefined,
+      step_label: isFlowStep(completedStep) ? STEP_LABELS[completedStep] : undefined,
       model,
       storage,
       duration_ms: Date.now() - viewedAtRef.current,
       ...extra,
-    });
+    };
+    trackEvent("quote_step_completed", stepPayload);
+    if (isFlowStep(completedStep)) {
+      trackEvent(quoteStepEventName(completedStep, "completed"), stepPayload);
+    }
   };
 
   useEffect(() => {
@@ -750,8 +760,8 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
     });
   };
 
-  const go = (next: StepKey) => {
-    trackStepCompleted(step);
+  const go = (next: StepKey, options: { completeCurrent?: boolean } = {}) => {
+    if (options.completeCurrent ?? true) trackStepCompleted(step);
     setStep(next);
     onShowResults?.(next === "results");
     scrollToFlowTop();
@@ -814,12 +824,12 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
       return;
     }
     if (step === "results") {
-      go(FLOW_STEPS[FLOW_STEPS.length - 1]);
+      go(FLOW_STEPS[FLOW_STEPS.length - 1], { completeCurrent: false });
       return;
     }
 
     const index = stepIndex(step);
-    if (index > 0) go(FLOW_STEPS[index - 1]);
+    if (index > 0) go(FLOW_STEPS[index - 1], { completeCurrent: false });
   };
 
   const handleFunctionAnswer = (value: boolean) => {
@@ -1395,7 +1405,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
             color={color}
             conditionAnswers={(submittedAnswers ?? answers) as unknown as Record<string, unknown>}
             updated={resultsTimestamp}
-            onBack={() => go("back")}
+            onBack={() => go("back", { completeCurrent: false })}
           />
         </div>
         <div className="cmp-commerce-mobile-only">
@@ -1405,7 +1415,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
             storage={formatStorage(storage)}
             color={color}
             conditionAnswers={(submittedAnswers ?? answers) as unknown as Record<string, unknown>}
-            onBack={() => go("back")}
+            onBack={() => go("back", { completeCurrent: false })}
           />
         </div>
       </div>
