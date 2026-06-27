@@ -763,14 +763,34 @@
 }
 
 .cmp-mcommerce-info {
+  align-items: flex-start;
   margin: 8px 0 14px;
-  border: 1.5px solid #d7efe4;
+  border: 1px solid #e2dbc9;
   border-radius: 13px;
-  background: #eefaf4;
-  color: var(--ink-soft);
+  background: #f1ece0;
+  color: #6f6750;
+  display: flex;
   font-size: 12.5px;
+  font-weight: 400;
+  gap: 9px;
   line-height: 1.5;
   padding: 12px 14px;
+}
+
+.cmp-mcommerce-info svg {
+  color: #a99a76;
+  flex: 0 0 auto;
+  height: 15px;
+  margin-top: 2px;
+  width: 15px;
+}
+
+.cmp-mcommerce-info p {
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  line-height: inherit;
+  margin: 0;
 }
 
 .cmp-mcommerce-panel h2 {
@@ -835,7 +855,7 @@
   border-radius: 0;
 }
 
-.cmp-mcommerce-pick > span,
+.cmp-mcommerce-pick > span:not(.cmp-mcommerce-fee-trail),
 .cmp-mcommerce-check > span {
   display: grid;
   width: 22px;
@@ -846,7 +866,7 @@
   border-radius: 999px;
 }
 
-.cmp-mcommerce-pick.selected > span,
+.cmp-mcommerce-pick.selected > span:not(.cmp-mcommerce-fee-trail),
 .cmp-mcommerce-check.on > span {
   border-color: var(--green-deep);
   background: var(--green-deep);
@@ -916,6 +936,109 @@
   font-size: 12.5px;
 }
 
+.cmp-mcommerce-feature-list {
+  display: grid;
+  gap: 5px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.cmp-mcommerce-feature-list li {
+  align-items: center;
+  color: var(--ink-faint);
+  display: flex;
+  font-size: 12.5px;
+  font-weight: 400;
+  gap: 7px;
+  line-height: 1.35;
+}
+
+.cmp-mcommerce-feature-list svg {
+  color: var(--green-deep);
+  flex: 0 0 auto;
+  height: 13px;
+  width: 13px;
+}
+
+.cmp-mcommerce-store-list {
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.cmp-mcommerce-choice.open .cmp-mcommerce-store-list {
+  border: 0;
+  border-top: 1px solid #cdeede;
+  border-radius: 0;
+  background: #eefaf4;
+  margin: 0;
+  padding: 13px 15px 15px;
+}
+
+.cmp-mcommerce-store-list h3 {
+  color: var(--ink);
+  font-family: var(--font-head);
+  font-size: 14px;
+  font-weight: 900;
+  margin: 0 0 10px;
+}
+
+.cmp-mcommerce-store-list > div {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.cmp-mcommerce-store-list button {
+  align-items: center;
+  border: 1.5px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg-card);
+  color: var(--ink-soft);
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+  padding: 9px 11px;
+  text-align: left;
+}
+
+.cmp-mcommerce-choice.open .cmp-mcommerce-store-list button {
+  background: #fff;
+}
+
+.cmp-mcommerce-store-list button svg {
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  color: transparent;
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 2px;
+  width: 18px;
+}
+
+.cmp-mcommerce-store-list button span {
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.cmp-mcommerce-store-list button.selected {
+  border-color: var(--green-deep);
+  background: #eefaf4;
+  color: var(--ink);
+}
+
+.cmp-mcommerce-store-list button.selected svg {
+  background: var(--green-deep);
+  border-color: var(--green-deep);
+  color: #fff;
+}
+
 .cmp-mcommerce-nested {
   margin: 0;
   border: 0;
@@ -955,10 +1078,89 @@
   }
 }
 
-.cmp-mcommerce-field span {
+.cmp-mcommerce-field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.cmp-mcommerce-field-label {
   color: var(--ink-soft);
   font-size: 12px;
   font-weight: 700;
+}
+
+.cmp-mcommerce-field-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px 4px 5px;
+  white-space: nowrap;
+}
+
+.cmp-mcommerce-field-action span {
+  position: relative;
+  width: 24px;
+  height: 14px;
+  border-radius: 999px;
+  background: #d8d4c8;
+  transition: background 0.16s;
+}
+
+.cmp-mcommerce-field-action span::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #fff;
+  content: "";
+  transition: transform 0.16s;
+}
+
+.cmp-mcommerce-field-action.on {
+  border-color: rgba(0, 147, 106, 0.22);
+  background: rgba(0, 147, 106, 0.05);
+  color: var(--green-deep);
+}
+
+.cmp-mcommerce-field-action.on span {
+  background: var(--green-deep);
+}
+
+.cmp-mcommerce-field-action.on span::after {
+  transform: translateX(10px);
+}
+
+.cmp-mcommerce-field-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.cmp-mcommerce-phone-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.cmp-mcommerce-phone-field .cmp-mcommerce-field {
+  margin-bottom: 6px;
+}
+
+.cmp-mcommerce-phone-field .cmp-mcommerce-field-action {
+  align-self: flex-start;
+  margin-bottom: 10px;
 }
 
 .cmp-mcommerce-field input {
@@ -1005,9 +1207,21 @@
   gap: 0 10px;
 }
 
-.cmp-mcommerce-form-grid .cmp-mcommerce-field:nth-child(3),
-.cmp-mcommerce-form-grid .cmp-mcommerce-field:nth-child(6) {
+.cmp-mcommerce-form-grid > .cmp-mcommerce-field:nth-child(3),
+.cmp-mcommerce-form-grid > .cmp-mcommerce-field:nth-child(4),
+.cmp-mcommerce-form-grid .cmp-mcommerce-field-wide {
   grid-column: 1 / -1;
+}
+
+.cmp-mcommerce-form-grid .cmp-mcommerce-phone-field,
+.cmp-mcommerce-address-row {
+  grid-column: 1 / -1;
+}
+
+.cmp-mcommerce-address-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
 }
 
 .cmp-mcommerce-helper {
@@ -1067,6 +1281,28 @@
 .cmp-mcommerce-check > span {
   border-radius: 6px;
   margin-top: 1px;
+}
+
+.cmp-mcommerce-check-copy {
+  min-width: 0;
+}
+
+.cmp-mcommerce-terms-link {
+  border: 0;
+  background: transparent;
+  color: var(--green-deep);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cmp-mcommerce-terms-link:hover,
+.cmp-mcommerce-terms-link:focus-visible {
+  color: #007a58;
 }
 
 .cmp-mcommerce-foot {

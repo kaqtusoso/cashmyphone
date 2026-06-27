@@ -10,7 +10,10 @@ export interface FunctionalChecks {
   network: boolean | null;
   faceId: boolean | null;
   selfieCamera: boolean | null;
+  rearCamera?: boolean | null;
   speaker: boolean | null;
+  chargingOrButtons?: boolean | null;
+  other?: boolean | null;
   bentOrWaterDamaged: boolean | null; // true = ja (dåligt), false = nej (bra)
 }
 
@@ -18,7 +21,13 @@ export interface ScreenFunctionChecks {
   brightSpots: boolean;
   deadPixels: boolean;
   linesOrBurnIn: boolean;
+  touchIssue?: boolean;
   allWorks: boolean;
+}
+
+export interface CriticalChecks {
+  bent: boolean;
+  waterDamaged: boolean;
 }
 
 export interface ConditionAnswers {
@@ -30,6 +39,7 @@ export interface ConditionAnswers {
   screenWear: WearLevel | null;
   sidesWear: WearLevelWithCrack | null;
   backWear: WearLevelWithCrack | null;
+  critical?: CriticalChecks;
 }
 
 export const initialFunctional: FunctionalChecks = {
@@ -37,7 +47,10 @@ export const initialFunctional: FunctionalChecks = {
   network: null,
   faceId: null,
   selfieCamera: null,
+  rearCamera: null,
   speaker: null,
+  chargingOrButtons: null,
+  other: null,
   bentOrWaterDamaged: null,
 };
 
@@ -45,7 +58,13 @@ export const initialScreenFunction: ScreenFunctionChecks = {
   brightSpots: false,
   deadPixels: false,
   linesOrBurnIn: false,
+  touchIssue: false,
   allWorks: false,
+};
+
+export const initialCritical: CriticalChecks = {
+  bent: false,
+  waterDamaged: false,
 };
 
 export const initialConditionAnswers: ConditionAnswers = {
@@ -57,4 +76,5 @@ export const initialConditionAnswers: ConditionAnswers = {
   screenWear: null,
   sidesWear: null,
   backWear: null,
+  critical: initialCritical,
 };

@@ -270,7 +270,7 @@ const ContactForm = () => {
                 }
               }}
               className={`h-12 rounded-xl border-2 ${emailError ? "border-red-500" : ""}`}
-              placeholder="jagälskar@cashmyphone.se"
+              placeholder="jagälskar@televera.se"
             />
             {emailError && <p className="text-red-500 text-sm mt-2">{emailError}</p>}
           </div>

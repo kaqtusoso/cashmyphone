@@ -89,28 +89,27 @@ html.cmp-mobile-home-active #root {
 }
 
 .cmp-mobile-brand img {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 116px;
+  height: auto;
   object-fit: contain;
 }
 
 .cmp-mobile-sell {
   flex: 0 0 auto;
-  border: 1.5px solid rgba(255, 255, 255, 0.42);
+  border: 0;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  background: #fff;
+  color: var(--cmp-mobile-green-deep);
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
-  padding: 7px 14px;
+  padding: 8px 15px;
 }
 
 .cmp-mobile-nav.solid .cmp-mobile-sell {
-  border-color: transparent;
   background: var(--cmp-mobile-green-deep);
   color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 147, 106, 0.18);
 }
 
 .cmp-mobile-nav.solid .cmp-mobile-menu-btn {
@@ -157,6 +156,7 @@ html.cmp-mobile-home-active #root {
 
 .cmp-mobile-hero {
   position: relative;
+  min-height: 0;
   overflow: visible;
   background: var(--cmp-mobile-green);
   color: #fff;
@@ -174,7 +174,7 @@ html.cmp-mobile-home-active #root {
 .cmp-mobile-hero-inner {
   position: relative;
   z-index: 1;
-  padding: 28px 20px 30px;
+  padding: 108px 20px 72px;
   text-align: center;
 }
 
@@ -188,11 +188,18 @@ html.cmp-mobile-home-active #root {
 }
 
 .cmp-mobile-hero h1 {
-  max-width: 340px;
+  max-width: 390px;
   margin: 0 auto;
   color: #fff;
-  font-size: 27px;
+  font-size: 42px;
   font-weight: 800;
+  line-height: 1.08;
+}
+
+@media (max-width: 360px) {
+  .cmp-mobile-hero h1 {
+    font-size: 37px;
+  }
 }
 
 .cmp-mobile-highlight {
@@ -315,16 +322,21 @@ html.cmp-mobile-home-active #root {
   right: 0;
   left: 0;
   z-index: 60;
-  max-height: 265px;
+  max-height: 266px;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--cmp-mobile-line);
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 18px 36px rgba(20, 24, 31, 0.18);
+  -webkit-overflow-scrolling: touch;
 }
 
 .cmp-mobile-search-menu button {
-  display: block;
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 13px;
+  align-items: center;
   width: 100%;
   border: 0;
   border-bottom: 1px solid var(--cmp-mobile-line-soft);
@@ -337,36 +349,54 @@ html.cmp-mobile-home-active #root {
   font-weight: 700;
 }
 
-.cmp-mobile-pills {
+.cmp-mobile-search-thumb {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: 12px;
+  background: #f5f6f7;
+  overflow: hidden;
+}
+
+.cmp-mobile-search-thumb img {
+  display: block;
+  width: auto;
+  height: 42px;
+  object-fit: contain;
+}
+
+.cmp-mobile-trust-chips {
   display: flex;
-  gap: 8px;
-  margin-top: 16px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: none;
-}
-
-.cmp-mobile-pills::-webkit-scrollbar {
-  display: none;
-}
-
-.cmp-mobile-pills span {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
+  flex-wrap: nowrap;
+  justify-content: center;
   gap: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
-  font-weight: 700;
-  padding: 8px 12px;
+  max-width: 100%;
+  margin: 18px auto 0;
+  font-family: var(--cmp-mobile-head);
 }
 
-.cmp-mobile-pills svg {
-  width: 15px;
-  height: 15px;
+.cmp-mobile-trust-chips span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 30px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-size: clamp(9px, 2.55vw, 11px);
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
+.cmp-mobile-trust-chips svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  stroke-width: 3;
 }
 
 .cmp-mobile-partners {
@@ -388,34 +418,58 @@ html.cmp-mobile-home-active #root {
   text-align: center;
 }
 
-.cmp-mobile-partners > div {
+.cmp-mobile-partners-track {
   display: flex;
   width: max-content;
   animation: cmp-mobile-marquee 22s linear infinite;
 }
 
+.cmp-mobile-partners-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 30px;
+  padding-right: 30px;
+}
+
 .cmp-mobile-partners span {
   display: flex;
-  width: 96px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
 }
 
 .cmp-mobile-partners img {
+  display: block;
+  width: auto;
   max-width: 76px;
   max-height: 19px;
   filter: grayscale(1);
   opacity: 0.45;
 }
 
+.cmp-mobile-partners span.compact img {
+  max-width: 34px;
+  max-height: 28px;
+}
+
+.cmp-mobile-partners span.phonehero img {
+  width: 69px;
+  max-width: none;
+  max-height: 19px;
+}
+
 @keyframes cmp-mobile-marquee {
   from { transform: translateX(0); }
-  to { transform: translateX(-768px); }
+  to { transform: translateX(-20%); }
 }
 
 .cmp-mobile-section {
-  padding: 28px 16px 24px;
+  padding: 44px 16px 42px;
+}
+
+.cmp-mobile-section + .cmp-mobile-section {
+  padding-top: 52px;
 }
 
 .cmp-mobile-how,
@@ -425,6 +479,10 @@ html.cmp-mobile-home-active #root {
 
 .cmp-mobile-why {
   background: var(--cmp-mobile-soft);
+}
+
+.cmp-mobile-how {
+  padding-top: 36px;
 }
 
 .cmp-mobile-kicker {
@@ -440,18 +498,32 @@ html.cmp-mobile-home-active #root {
   color: var(--cmp-mobile-green-deep);
   font-size: 21px;
   line-height: 1;
+  text-align: center;
+}
+
+.cmp-mobile-faq .cmp-mobile-kicker {
+  margin-bottom: 1px;
 }
 
 .cmp-mobile-section h2 {
-  margin-bottom: 20px;
+  margin-bottom: 28px;
   color: var(--cmp-mobile-ink);
   font-size: 23px;
   font-weight: 800;
 }
 
+.cmp-mobile-why h2,
+.cmp-mobile-faq h2 {
+  text-align: center;
+}
+
+.cmp-mobile-faq h2 {
+  margin-top: -8px;
+}
+
 .cmp-mobile-step-card {
   position: relative;
-  margin: 0 0 12px;
+  margin: 0 0 18px;
   border: 1.5px solid var(--cmp-mobile-line);
   border-radius: 16px;
   background: #fff;
@@ -510,7 +582,7 @@ html.cmp-mobile-home-active #root {
   display: flex;
   gap: 14px;
   align-items: flex-start;
-  margin-bottom: 10px;
+  margin-bottom: 18px;
   border: 1.5px solid var(--cmp-mobile-line);
   border-radius: 16px;
   background: var(--cmp-mobile-card);
@@ -538,6 +610,7 @@ html.cmp-mobile-home-active #root {
 
 .cmp-mobile-faq > div {
   border-top: 1.5px solid var(--cmp-mobile-line);
+  margin-top: 6px;
 }
 
 .cmp-mobile-faq article {
@@ -554,7 +627,7 @@ html.cmp-mobile-home-active #root {
   background: transparent;
   color: var(--cmp-mobile-ink);
   cursor: pointer;
-  padding: 16px 2px;
+  padding: 20px 2px;
   text-align: left;
   font-size: 14px;
   font-weight: 800;
@@ -655,9 +728,8 @@ html.cmp-mobile-home-active #root {
 }
 
 .cmp-mobile-footer img {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 116px;
+  height: auto;
 }
 
 .cmp-mobile-footer strong {
@@ -671,6 +743,38 @@ html.cmp-mobile-home-active #root {
   max-width: 34ch;
   margin-bottom: 22px;
   color: #8b93a0;
+}
+
+.cmp-mobile-footer-links {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.cmp-mobile-footer nav {
+  display: grid;
+  gap: 9px;
+  align-content: start;
+}
+
+.cmp-mobile-footer h3 {
+  margin: 0 0 2px;
+  color: #fff;
+  font-family: var(--cmp-mobile-head);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cmp-mobile-footer a {
+  color: #c7ccd4;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.cmp-mobile-footer a:hover {
+  color: #fff;
 }
 
 .cmp-mobile-footer small {
@@ -688,7 +792,7 @@ html.cmp-mobile-home-active #root {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cmp-mobile-partners > div {
+  .cmp-mobile-partners-track {
     animation: none;
   }
 }

@@ -1,7 +1,7 @@
 /**
  * apiQuote.ts
  *
- * Anropar CashMyPhone backend (/api/quote) och mappar svaret till
+ * Anropar Televera backend (/api/quote) och mappar svaret till
  * CompanyOffer[] som resten av appen förväntar sig.
  */
 import { ConditionAnswers, WearLevel, WearLevelWithCrack, ScreenGlass } from "@/types/condition";
@@ -69,7 +69,7 @@ const RETAILER_INFO: Record<
   },
   renewed: {
     name: "ReNewed",
-    leverans: "Gratis försäljningspaket",
+    leverans: "Digital fraktsedel",
     utbetalningstid: "2-4 bankdagar",
     trustpilotScore: "4.1",
     trustpilotReviews: "32",
@@ -78,16 +78,16 @@ const RETAILER_INFO: Record<
   },
   fixiphone: {
     name: "FixiPhone",
-    leverans: "Gratis försäljningspaket",
+    leverans: "Digital fraktsedel / butik",
     utbetalningstid: "2-4 bankdagar",
     trustpilotScore: "3.9",
     trustpilotReviews: "168",
     trustpilotUrl: "https://se.trustpilot.com/review/fixiphone.se",
-    paymentMethods: ["Swish", "Banköverföring"],
+    paymentMethods: ["Banköverföring"],
   },
   fixphonepro: {
     name: "FixTech",
-    leverans: "Gratis försäljningspaket",
+    leverans: "Digital fraktsedel / butik",
     utbetalningstid: "2-4 bankdagar",
     trustpilotScore: "4.0",
     trustpilotReviews: "3",
@@ -142,6 +142,52 @@ const storageToGb = (s: string): number => {
 
 // ─── Datum/tid från backend ──────────────────────────────────────────────────
 
+const SCRAPE_DISPLAY_HOURS = [0, 6, 12, 18];
+
+const stockholmDateParts = (date: Date) => {
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Stockholm",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+
+  return {
+    year: Number(value("year")),
+    month: Number(value("month")),
+    day: Number(value("day")),
+    hour: Number(value("hour")),
+    minute: Number(value("minute")),
+  };
+};
+
+const scheduledScrapeDisplayTime = (date: Date): string => {
+  const parts = stockholmDateParts(date);
+  const current = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+
+  const nearest = SCRAPE_DISPLAY_HOURS.flatMap((hour) => [
+    Date.UTC(parts.year, parts.month - 1, parts.day - 1, hour, 0),
+    Date.UTC(parts.year, parts.month - 1, parts.day, hour, 0),
+    Date.UTC(parts.year, parts.month - 1, parts.day + 1, hour, 0),
+  ]).reduce((best, candidate) => (
+    Math.abs(candidate - current) < Math.abs(best - current) ? candidate : best
+  ));
+
+  const snapped = new Date(nearest);
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return [
+    snapped.getUTCFullYear(),
+    pad(snapped.getUTCMonth() + 1),
+    pad(snapped.getUTCDate()),
+  ].join("-") + ` ${pad(snapped.getUTCHours())}:00`;
+};
+
 const formatUpdatedAt = (value?: string | null): string => {
   if (!value) return "";
 
@@ -149,14 +195,7 @@ const formatUpdatedAt = (value?: string | null): string => {
 
   if (Number.isNaN(date.getTime())) return "";
 
-  return date.toLocaleString("sv-SE", {
-    timeZone: "Europe/Stockholm",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return scheduledScrapeDisplayTime(date);
 };
 
 // ─── Bygg QuoteRequest från frontend-svar ────────────────────────────────────
@@ -170,10 +209,13 @@ const buildPayload = (model: string, storage: string, a: ConditionAnswers) => {
     f.network === false ||
     f.faceId === false ||
     f.selfieCamera === false ||
-    f.speaker === false;
+    f.rearCamera === false ||
+    f.speaker === false ||
+    f.chargingOrButtons === false ||
+    f.other === false;
 
-  const isWaterDamaged = f.bentOrWaterDamaged === true;
-  const isScreenBroken = !sf.allWorks && (sf.brightSpots || sf.deadPixels || sf.linesOrBurnIn);
+  const isWaterDamaged = f.bentOrWaterDamaged === true || a.critical?.bent === true || a.critical?.waterDamaged === true;
+  const isScreenBroken = !sf.allWorks && (sf.brightSpots || sf.deadPixels || sf.linesOrBurnIn || sf.touchIssue);
   const isGlassBroken = a.screenGlass === "chipped" || a.screenGlass === "scratched";
   const isBatteryLow = a.batteryHealth !== null && a.batteryHealth < 85;
 
@@ -182,6 +224,7 @@ const buildPayload = (model: string, storage: string, a: ConditionAnswers) => {
   return {
     model,
     storage_gb: storageToGb(storage),
+    battery_health_percent: a.batteryHealth,
     screen_surface: screenSurface,
     sides_surface: wearToSurface(a.sidesWear),
     back_surface: wearToSurface(a.backWear),

@@ -7,7 +7,7 @@ Kör manuellt:
     python scripts/push_swappie.py
 
 Lägg till i crontab för daglig körning kl 06:00:
-    0 6 * * * cd /Users/pascalbrjansson/Documents/Claude/Projects/CashMyPhone && python scripts/push_swappie.py >> /tmp/swappie_push.log 2>&1
+    0 6 * * * cd /path/to/televera && python scripts/push_swappie.py >> /tmp/swappie_push.log 2>&1
 """
 import asyncio
 import json
@@ -27,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Konfiguration ────────────────────────────────────────────────────────────
-RAILWAY_URL = "https://cashmyphone-production.up.railway.app"
+RAILWAY_URL = "https://televera-production.up.railway.app"
 API_KEY     = "banankaka998877665544332211"
 
 API_BASE    = "https://swappie.com/api/sell/api/v3/prices/"
@@ -48,8 +48,8 @@ IPHONE_MODELS: List[str] = [
     "iPhone 16 Pro Max", "iPhone 16 Pro", "iPhone 16 Plus", "iPhone 16",
     "iPhone 15 Pro Max", "iPhone 15 Pro", "iPhone 15 Plus", "iPhone 15",
     "iPhone 14 Pro Max", "iPhone 14 Pro", "iPhone 14 Plus", "iPhone 14",
-    "iPhone 13 Pro Max", "iPhone 13 Pro", "iPhone 13 mini", "iPhone 13",
-    "iPhone 12 Pro Max", "iPhone 12 Pro", "iPhone 12 mini", "iPhone 12",
+    "iPhone 13 Pro Max", "iPhone 13 Pro", "iPhone 13 Mini", "iPhone 13",
+    "iPhone 12 Pro Max", "iPhone 12 Pro", "iPhone 12 Mini", "iPhone 12",
     "iPhone 11 Pro Max", "iPhone 11 Pro", "iPhone 11",
     "iPhone SE (3rd generation)", "iPhone SE (2nd generation)",
     "iPhone XS Max", "iPhone XS", "iPhone XR",

@@ -1,7 +1,7 @@
 import { createContext, useState, useEffect, ReactNode } from "react";
 import { SavedOffer, SavedOffersContextType } from "@/types/savedOffers";
 
-const STORAGE_KEY = "cashmyphone_savedOffers";
+const STORAGE_KEY = "televera_savedOffers";
 const MAX_OFFERS = 20;
 const EXPIRY_TIME = 4 * 60 * 60 * 1000; // 4 hours
 

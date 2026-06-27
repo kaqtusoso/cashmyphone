@@ -9,8 +9,38 @@ const storageGbToLabel = (value: number) => {
   return `${value}GB`;
 };
 
+const normalizeModelName = (value: string) => {
+  let model = value.replace(/\s+/g, " ").trim();
+  if (!model) return model;
+
+  if (!/^iphone\b/i.test(model)) {
+    model = `iPhone ${model}`;
+  }
+
+  return model
+    .replace(/\biPhone\s+16\s+E\b/i, "iPhone 16e")
+    .replace(/\biPhone\s+16e\b/i, "iPhone 16e")
+    .replace(/\biPhone\s+17\s+Air\b/i, "iPhone Air")
+    .replace(/\biPhone\s+Air\b/i, "iPhone Air")
+    .replace(/\biPhone\s+SE\s*\(?2020\)?/i, "iPhone SE 2020")
+    .replace(/\biPhone\s+SE\s*\(?2022\)?/i, "iPhone SE 2022")
+    .replace(/\bmini\b/gi, "Mini")
+    .replace(/\bpro max\b/gi, "Pro Max")
+    .replace(/\bpro\b/gi, "Pro")
+    .replace(/\bplus\b/gi, "Plus")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const filterStorageForModel = (model: string, storages: number[]) => {
+  const labels = [...new Set(storages)].sort((a, b) => a - b).map(storageGbToLabel);
+  const allowed = fallbackStorageByModel[model];
+  if (!allowed) return labels;
+  return labels.filter((label) => allowed.includes(label));
+};
+
 const sortModels = (models: string[]) => {
-  const unique = [...new Set(models)];
+  const unique = [...new Set(models.map(normalizeModelName).filter(Boolean))];
   const fallbackRank = new Map(fallbackModels.map((model, index) => [model, index]));
 
   return unique.sort((a, b) => {
@@ -44,11 +74,18 @@ export const useIphoneCatalog = () => {
 
         if (storageResponse.ok) {
           const apiStorage = (await storageResponse.json()) as Record<string, number[]>;
+          const storageEntries = new Map<string, number[]>();
+
+          Object.entries(apiStorage).forEach(([model, storages]) => {
+            const normalizedModel = normalizeModelName(model);
+            if (!normalizedModel) return;
+            storageEntries.set(normalizedModel, [...(storageEntries.get(normalizedModel) ?? []), ...storages]);
+          });
+
           const nextStorage = Object.fromEntries(
-            Object.entries(apiStorage).map(([model, storages]) => [
-              model,
-              [...new Set(storages)].sort((a, b) => a - b).map(storageGbToLabel),
-            ]),
+            [...storageEntries.entries()]
+              .map(([model, storages]) => [model, filterStorageForModel(model, storages)] as const)
+              .filter(([, storages]) => storages.length),
           );
           if (Object.keys(nextStorage).length) setStorageByModel({ ...fallbackStorageByModel, ...nextStorage });
         }

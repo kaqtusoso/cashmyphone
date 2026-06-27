@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    /* Pure white background (CMP green-white theme) */
+    /* Pure white background (Televera green-white theme) */
     --background: 0 0% 100%;
     --foreground: 220 20% 10%;
 
@@ -16,7 +16,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 10%;
 
-    /* CMP green primary (#00B87A) */
+    /* Televera green primary (#00B87A) */
     --primary: 152 100% 36%;
     --primary-foreground: 0 0% 100%;
 
@@ -211,7 +211,7 @@
   top: calc(100% + 0.45rem);
   right: 0;
   left: 0;
-  max-height: 18rem;
+  max-height: 17.35rem;
   overflow: auto;
   border: 1px solid var(--cmp-line);
   border-radius: 1rem;
@@ -1041,8 +1041,8 @@
   }
 
   .claude-hero {
-    min-height: 30rem;
-    padding: 3.25rem 1.25rem 4rem;
+    min-height: 70vh;
+    padding: 7rem 1.25rem 5rem;
   }
 
   .claude-hero h1 {
@@ -1062,23 +1062,6 @@
     width: calc(100vw - 2.5rem);
   }
 
-  .claude-pills {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    overflow-x: auto;
-    padding: 0 1rem 0.2rem;
-    margin-right: -1.25rem;
-    margin-left: -1.25rem;
-    scrollbar-width: none;
-  }
-
-  .claude-pills::-webkit-scrollbar {
-    display: none;
-  }
-
-  .claude-pills span {
-    flex: 0 0 auto;
-  }
 }
 
 .claude-nav {
@@ -1108,9 +1091,8 @@
 }
 
 .claude-brand img {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.55rem;
+  width: 8.25rem;
+  height: auto;
   object-fit: contain;
 }
 
@@ -1138,9 +1120,9 @@
 
 .claude-hero {
   display: grid;
-  min-height: 31rem;
+  min-height: 68vh;
   place-items: center;
-  padding: 4rem 1.25rem 4.8rem;
+  padding: 10rem 1.25rem 6rem;
   background:
     radial-gradient(700px 360px at 82% 70%, rgba(255, 255, 255, 0.16), transparent 60%),
     var(--green);
@@ -1250,15 +1232,16 @@
   left: 0.45rem;
   overflow: auto;
   max-height: 18rem;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: 1rem;
   background: #fff;
   box-shadow: 0 18px 44px rgba(20, 24, 31, 0.18);
+  -webkit-overflow-scrolling: touch;
 }
 
 .claude-search-menu button,
 .claude-search-menu p {
-  display: block;
   width: 100%;
   padding: 0.85rem 1rem;
   border: 0;
@@ -1269,26 +1252,36 @@
   font-weight: 700;
 }
 
+.claude-search-menu button {
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.claude-search-menu p {
+  display: block;
+}
+
+.claude-search-thumb {
+  display: grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  place-items: center;
+  border-radius: 0.8rem;
+  background: #f5f6f7;
+  overflow: hidden;
+}
+
+.claude-search-thumb img {
+  display: block;
+  width: auto;
+  height: 2.75rem;
+  object-fit: contain;
+}
+
 .claude-search-menu button:hover {
   background: var(--bg);
-}
-
-.claude-pills {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.65rem;
-  margin-top: 1.5rem;
-}
-
-.claude-pills span {
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.13);
-  color: #fff;
-  padding: 0.55rem 0.9rem;
-  font-size: 0.9rem;
-  font-weight: 800;
 }
 
 .claude-partners {
@@ -1745,6 +1738,101 @@
   font-weight: 900;
 }
 
+.claude-dropdown-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: #fbfaf6;
+}
+
+.claude-dropdown-panel.compact {
+  margin-top: 0.65rem;
+  padding: 0.75rem;
+}
+
+.claude-dropdown-panel h2 {
+  margin: 0 0 0.8rem;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.claude-checkbox-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.claude-checkbox-list.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.claude-checkbox-list button {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  min-height: 3.35rem;
+  border: 1.5px solid var(--line);
+  border-radius: 0.85rem;
+  background: #fff;
+  color: var(--ink);
+  padding: 0.82rem 0.9rem;
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(20,24,31,.03);
+}
+
+.claude-checkbox-list button:hover {
+  border-color: var(--green-deep);
+}
+
+.claude-checkbox-list button.selected {
+  border-color: var(--green-deep);
+  background: #eefaf4;
+}
+
+.claude-checkbox-list button > span {
+  position: relative;
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  place-items: center;
+  border: 2px solid var(--line);
+  border-radius: 0.32rem;
+}
+
+.claude-checkbox-list button.selected > span {
+  border-color: var(--green-deep);
+  background: var(--green-deep);
+}
+
+.claude-checkbox-list button.selected > span::after {
+  content: "";
+  width: 0.42rem;
+  height: 0.72rem;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-0.03rem, -0.04rem);
+}
+
+.claude-checkbox-list strong {
+  font-size: 0.98rem;
+  font-weight: 850;
+}
+
+.claude-checkbox-list.compact button {
+  min-height: 3rem;
+  padding: 0.72rem 0.8rem;
+}
+
+.claude-checkbox-list.compact strong {
+  font-size: 0.9rem;
+  line-height: 1.16;
+}
+
 .claude-battery {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -2050,8 +2138,8 @@
   }
 
   .claude-brand img {
-    width: 2.25rem;
-    height: 2.25rem;
+    width: 9rem;
+    height: auto;
   }
 
   .claude-info-section {
@@ -2118,6 +2206,12 @@
 
   .claude-step-card {
     min-height: 28rem;
+  }
+}
+
+@media (max-width: 620px) {
+  .claude-checkbox-list.compact {
+    grid-template-columns: 1fr;
   }
 }
 

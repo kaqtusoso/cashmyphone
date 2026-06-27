@@ -12,3 +12,8 @@ Allow: /
 
 User-agent: *
 Allow: /
+Disallow: /checkout
+Disallow: /checkout/
+Disallow: /summary
+
+Sitemap: https://televera.se/sitemap.xml

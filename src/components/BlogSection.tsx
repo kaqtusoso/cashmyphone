@@ -27,7 +27,7 @@ const blogPosts = [
     fullSummary: [
       "Samma iPhone kan värderas med hundralappars skillnad beroende på köparens lagerstatus och affärsmodell",
       "Återförsäljare med fullt lager betalar mindre, medan de som behöver påfyllning betalar toppris",
-      "CashMyPhone samlar alla stora återförsäljare på ett ställe så du ser direkt vem som betalar bäst",
+      "Televera samlar alla stora återförsäljare på ett ställe så du ser direkt vem som betalar bäst",
     ],
     content: (onCtaClick: () => void) => (
       <>
@@ -77,7 +77,7 @@ const blogPosts = [
           drar ner priset du får se på skärmen.
         </p>
 
-        <h3 className="text-xl font-semibold mt-8 mb-4">Varför vi startade CashMyPhone.se</h3>
+        <h3 className="text-xl font-semibold mt-8 mb-4">Varför vi startade Televera.se</h3>
         <p>
           När vi började titta på det här insåg vi hur skevt det var. Att sälja sin telefon är ju tillräckligt med
           projekt som det är – man ska radera data, hitta originalkartongen och packa ner den. Att man dessutom
@@ -85,7 +85,7 @@ const blogPosts = [
           första bästa bud.
         </p>
         <p>
-          Det är precis därför vi skapade <strong>CashMyPhone.se</strong>.
+          Det är precis därför vi skapade <strong>Televera.se</strong>.
         </p>
         <p>
           Vi tycker inte att det ska krävas en timmes research för att få rättvist betalt. Genom att samla de största
@@ -115,7 +115,7 @@ const blogPosts = [
       "15,6 miljoner gamla mobiltelefoner samlar damm i svenska hem – fler telefoner än människor i landet",
       "Cirka 5 miljoner är i tillräckligt gott skick för att säljas vidare direkt",
       "Med ett snittvärde på 1 500 kr per telefon landar totalsumman på närmare 10 miljarder kronor",
-      "CashMyPhone gör det enkelt att se vad just din telefon är värd på under 30 sekunder",
+      "Televera gör det enkelt att se vad just din telefon är värd på under 30 sekunder",
     ],
     content: (onCtaClick: () => void) => (
       <>
@@ -202,7 +202,7 @@ const blogPosts = [
 
         <div className="bg-[#F1F8F4] rounded-xl p-6 mt-8 border-l-4 border-primary">
           <p className="font-medium text-foreground mb-0">
-            Vi på <strong>CashMyPhone.se</strong> skapade vår tjänst just för att det inte ska finnas några ursäkter
+            Vi på <strong>Televera.se</strong> skapade vår tjänst just för att det inte ska finnas några ursäkter
             kvar. Att kolla om din del av de där 10 miljarderna finns i din låda tar ungefär 30 sekunder. Det är en
             ganska bra timpeng.
           </p>
@@ -211,7 +211,7 @@ const blogPosts = [
     ),
   },
   {
-    title: "Så fungerar CashMyPhone (bakom kulisserna)",
+    title: "Så fungerar Televera (bakom kulisserna)",
     subtitle: "Från knapptryck till pengar på kontot",
     icon: "⚙️",
     excerpt:
@@ -225,7 +225,7 @@ const blogPosts = [
     content: (onCtaClick: () => void) => (
       <>
         <p>
-          Många tror att vi på CashMyPhone bara är en lista med priser. Men sanningen är att vi har byggt tjänsten för
+          Många tror att vi på Televera bara är en lista med priser. Men sanningen är att vi har byggt tjänsten för
           att vara den enda länken du behöver mellan din byrålåda och ditt bankkonto.
         </p>
         <p>
@@ -246,7 +246,7 @@ const blogPosts = [
 
         <h3 className="text-xl font-semibold mt-8 mb-4">2. Du gör allt på ett ställe</h3>
         <p>
-          Det här är den största fördelen med CashMyPhone. När du har hittat ett pris du är nöjd med behöver du inte
+          Det här är den största fördelen med Televera. När du har hittat ett pris du är nöjd med behöver du inte
           lämna vår sida för att slutföra affären.
         </p>
         <p>

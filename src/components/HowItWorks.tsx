@@ -30,7 +30,7 @@ const HowItWorks = () => {
             <div className="w-64 md:w-80 drop-shadow-2xl">
               <img
                 src={iphoneMockup}
-                alt="iPhone-värdering på cashmyphone.se"
+                alt="iPhone-värdering på televera.se"
                 className="w-full h-auto object-contain object-bottom block"
                 loading="lazy"
                 decoding="async"

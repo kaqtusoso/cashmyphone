@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -14,6 +14,10 @@ import TermsDialog from "@/components/TermsDialog";
 import { useSavedOffers } from "@/hooks/useSavedOffers";
 import { formatPersonalNumber } from "@/utils/checkoutValidation";
 import { makeOptimisticOrder, pendingOrderIntegrations, submitOrder as submitOrderRequest } from "@/utils/orders";
+import { dealerConfig, requiresPersonalNumber } from "@/utils/vendorCheckout";
+import { trackEvent, trackStepView } from "@/utils/tracking";
+
+export { dealerConfig } from "@/utils/vendorCheckout";
 
 // =====================
 // Schema & Types
@@ -26,8 +30,8 @@ const checkoutSchema = z
     lastName: z.string().min(1, "Efternamn krävs"),
     personalNumber: z
       .string()
-      .min(1, "Personnummer krävs")
-      .regex(/^\d{8}-?\d{4}$/, "Ogiltigt personnummer (ÅÅÅÅMMDD-XXXX)"),
+      .optional()
+      .refine((value) => !value || /^\d{8}-?\d{4}$/.test(value), "Ogiltigt personnummer (ÅÅÅÅMMDD-XXXX)"),
     address: z.string().min(1, "Gatuadress krävs"),
     postalCode: z.string().min(1, "Postnummer krävs"),
     city: z.string().min(1, "Stad krävs"),
@@ -62,200 +66,13 @@ const checkoutSchema = z
 
 type CheckoutFormData = z.infer<typeof checkoutSchema>;
 
-type ShippingOption = {
-  id: string;
-  label: string;
-  description?: string;
-  bullets?: string[];
-};
-
-type PaymentOption = {
-  id: string;
-  label: string;
-  requiresBankDetails: boolean;
-};
-
 const paypalFee = (priceSek: number) => (priceSek >= 5000 ? 100 : Math.round(priceSek * 0.02));
 const ORDER_SUBMIT_ANIMATION_MS = 800;
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
-export type DealerConfig = {
-  name: string;
-  shippingOptions: ShippingOption[];
-  paymentOptions: PaymentOption[];
-};
-
-// =====================
-// Dealer Config
-// =====================
-
-export const dealerConfig: Record<string, DealerConfig> = {
-  swappie: {
-    name: "Swappie",
-    shippingOptions: [
-      {
-        id: "sales-package",
-        label: "Gratis försäljningspaket",
-        description: "Levereras hem till dig inom 3–5 arbetsdagar",
-        bullets: ["Gratis & säkert", "Fri fraktetikett ingår", "Skyddar din enhet"],
-      },
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Kostnadsfritt", "Skriv ut hemma", "Skicka när det passar dig"],
-      },
-    ],
-    paymentOptions: [
-      { id: "paypal", label: "PayPal", requiresBankDetails: false },
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
-  },
-  fixmyphone: {
-    name: "FixMyPhone",
-    shippingOptions: [
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Fri frakt tur & retur", "Fraktsedel via e-post", "Snabb hantering vid mottagande"],
-      },
-      {
-        id: "sales-package",
-        label: "Gratis försäljningspaket",
-        description: "Levereras hem till dig inom 3–5 arbetsdagar",
-        bullets: [
-          "Gratis paket & fraktsedel hem",
-          "Skyddar mobilen under transport",
-          "Betalning direkt efter mottagandet",
-        ],
-      },
-    ],
-    paymentOptions: [
-      { id: "swish", label: "Swish", requiresBankDetails: false },
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
-  },
-  happyphone: {
-    name: "HappyPhone",
-    shippingOptions: [
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Fri frakt tur & retur", "Fraktsedel via e-post", "Snabb hantering vid mottagande"],
-      },
-      {
-        id: "sales-package",
-        label: "Gratis försäljningspaket",
-        description: "Levereras hem till dig inom 3–5 arbetsdagar",
-        bullets: [
-          "Gratis paket & fraktsedel hem",
-          "Skyddar mobilen under transport",
-          "Betalning direkt efter mottagandet",
-        ],
-      },
-    ],
-    paymentOptions: [
-      { id: "swish", label: "Swish", requiresBankDetails: false },
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
-  },
-  telestore: {
-    name: "Telestore",
-    shippingOptions: [
-      {
-        id: "sales-package",
-        label: "Gratis försäljningspaket",
-        description: "Levereras hem till dig inom 1-3 arbetsdagar",
-        bullets: ["Gratis & säkert", "Fri fraktetikett ingår", "Skyddar din enhet"],
-      },
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Gratis fraktsedel via e-post", "Spårbart & försäkrat paket", "Utbetalning samma dag"],
-      },
-    ],
-    paymentOptions: [
-      { id: "swish", label: "Swish", requiresBankDetails: false },
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
-  },
-  renewed: {
-    name: "Renewed",
-    shippingOptions: [
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Kostnadsfritt", "Skriv ut hemma", "Skicka när det passar dig"],
-      },
-    ],
-    paymentOptions: [{ id: "bank", label: "Banköverföring", requiresBankDetails: true }],
-  },
-  phonehero: {
-    name: "PhoneHero",
-    shippingOptions: [
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Kostnadsfritt", "Skriv ut hemma", "Skicka när det passar dig"],
-      },
-      {
-        id: "sales-package",
-        label: "Gratis försäljningspaket",
-        description: "Levereras hem till dig inom 3–5 arbetsdagar",
-        bullets: ["Gratis & säkert", "Fri fraktetikett ingår", "Skyddar din enhet"],
-      },
-    ],
-    paymentOptions: [
-      { id: "swish", label: "Swish", requiresBankDetails: false },
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
-  },
-  fixiphone: {
-    name: "FixiPhone",
-    shippingOptions: [
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Fri frakt", "Spårbar försändelse", "Instruktioner via e-post"],
-      },
-    ],
-    paymentOptions: [
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
-  },
-  fixphonepro: {
-    name: "FixTech",
-    shippingOptions: [
-      {
-        id: "email-label",
-        label: "Fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Fri frakt", "Spårbar försändelse", "Instruktioner via e-post"],
-      },
-    ],
-    paymentOptions: [
-      { id: "swish", label: "Swish", requiresBankDetails: false },
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
-  },
-  cleverbuy: {
-    name: "CleverBuy",
-    shippingOptions: [
-      {
-        id: "email-label",
-        label: "Digital fraktsedel via e-post",
-        description: "Få fraktsedeln direkt till din inkorg",
-        bullets: ["Kostnadsfritt", "Skriv ut hemma", "Utbetalning inom 2-4 dagar"],
-      },
-    ],
-    paymentOptions: [{ id: "bank-iban", label: "Banköverföring (IBAN)", requiresBankDetails: true }],
-  },
+const CHECKOUT_STEP_SLUGS: Record<number, string> = {
+  1: "uppgifter",
+  2: "frakt-betalning",
+  3: "bekrafta",
 };
 
 // =====================
@@ -271,6 +88,7 @@ export interface CheckoutContentProps {
   savedOfferId?: string;
   compact?: boolean;
   showRestoredBanner?: boolean;
+  initialStep?: number;
 }
 
 // =====================
@@ -286,26 +104,61 @@ const CheckoutContent = ({
   savedOfferId,
   compact = false,
   showRestoredBanner = false,
+  initialStep = 1,
 }: CheckoutContentProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { removeSavedOffer } = useSavedOffers();
   const config = dealerConfig[dealer] || dealerConfig.swappie;
+  const priceSek = parseInt(price || "0", 10);
 
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(initialStep);
   const [useSamePhoneForSwish, setUseSamePhoneForSwish] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showCashMyPhoneTerms, setShowCashMyPhoneTerms] = useState(false);
+  const [showTeleveraTerms, setShowTeleveraTerms] = useState(false);
   const [showVendorTerms, setShowVendorTerms] = useState(false);
   const [showPersonalNumberInfo, setShowPersonalNumberInfo] = useState(false);
+  const [selectedStore, setSelectedStore] = useState("");
+  const viewedAtRef = useRef(Date.now());
 
   useEffect(() => {
     if (!compact) window.scrollTo({ top: 0, behavior: "instant" });
   }, [currentStep, compact]);
 
+  useEffect(() => {
+    if (compact) return;
+    setCurrentStep(initialStep);
+  }, [compact, initialStep]);
+
+  useEffect(() => {
+    if (compact) return;
+    const slug = CHECKOUT_STEP_SLUGS[currentStep];
+    const target = `/checkout/${slug}${location.search}`;
+    if (`${location.pathname}${location.search}` !== target) {
+      navigate(target, { replace: true });
+    }
+  }, [compact, currentStep, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    viewedAtRef.current = Date.now();
+    trackStepView("checkout_step_viewed", {
+      funnel: "checkout",
+      surface: compact ? "compact" : "page",
+      step: currentStep,
+      checkout_step: CHECKOUT_STEP_SLUGS[currentStep],
+      model,
+      storage,
+      dealer: config.name,
+      price: priceSek,
+    });
+  }, [compact, config.name, currentStep, model, priceSek, storage]);
+
   const {
     register,
     watch,
     setValue,
+    setError,
+    clearErrors,
     trigger,
     getValues,
     formState: { errors, submitCount },
@@ -318,30 +171,100 @@ const CheckoutContent = ({
 
   const findMyIphoneDisabled = watch("findMyIphoneDisabled");
   const termsAccepted = watch("termsAccepted");
+  const selectedPaymentMethod = watch("paymentMethod");
+  const showPersonalNumberInCustomerStep = config.personalNumberRequirement === "always";
+  const showPersonalNumberInSwishStep = config.personalNumberRequirement === "swish";
+  const selectedShippingOption = config.shippingOptions.find((option) => option.id === watch("shippingOption"));
+  const requiresStoreSelection = Boolean(selectedShippingOption?.stores?.length);
+  const shippingFeeSek = selectedShippingOption?.feeSek ?? 0;
   const showErrors = submitCount > 0;
 
   const stepTitles = ["Dina uppgifter", "Frakt & betalning", "Bekräfta din beställning"];
 
   const nextStep = async () => {
     if (currentStep === 1) {
+      if (!showPersonalNumberInCustomerStep) clearErrors("personalNumber");
       const isValid = await trigger(
-        ["firstName", "lastName", "personalNumber", "address", "postalCode", "city", "phone", "email"],
+        [
+          "firstName",
+          "lastName",
+          ...(showPersonalNumberInCustomerStep ? (["personalNumber"] as const) : []),
+          "address",
+          "postalCode",
+          "city",
+          "phone",
+          "email",
+        ],
         { shouldFocus: false },
       );
       if (!isValid) {
+        trackEvent("validation_error", {
+          funnel: "checkout",
+          surface: compact ? "compact" : "page",
+          step: 1,
+          checkout_step: CHECKOUT_STEP_SLUGS[1],
+          fields: Object.keys(errors).join(","),
+          model,
+          storage,
+          dealer: config.name,
+        });
         toast.error("Vänligen fyll i alla obligatoriska fält");
         return;
       }
+      trackEvent("checkout_step_completed", {
+        funnel: "checkout",
+        surface: compact ? "compact" : "page",
+        step: 1,
+        checkout_step: CHECKOUT_STEP_SLUGS[1],
+        model,
+        storage,
+        dealer: config.name,
+        duration_ms: Date.now() - viewedAtRef.current,
+      });
       setCurrentStep(2);
       return;
     }
 
     if (currentStep === 2) {
       if (!watch("shippingOption")) {
+        trackEvent("validation_error", {
+          funnel: "checkout",
+          surface: compact ? "compact" : "page",
+          step: 2,
+          checkout_step: CHECKOUT_STEP_SLUGS[2],
+          fields: "shippingOption",
+          model,
+          storage,
+          dealer: config.name,
+        });
         toast.error("Välj ett fraktalternativ");
         return;
       }
+      if (requiresStoreSelection && !selectedStore) {
+        trackEvent("validation_error", {
+          funnel: "checkout",
+          surface: compact ? "compact" : "page",
+          step: 2,
+          checkout_step: CHECKOUT_STEP_SLUGS[2],
+          fields: "selectedStore",
+          model,
+          storage,
+          dealer: config.name,
+        });
+        toast.error("Välj butik för inlämning");
+        return;
+      }
       if (!watch("paymentMethod")) {
+        trackEvent("validation_error", {
+          funnel: "checkout",
+          surface: compact ? "compact" : "page",
+          step: 2,
+          checkout_step: CHECKOUT_STEP_SLUGS[2],
+          fields: "paymentMethod",
+          model,
+          storage,
+          dealer: config.name,
+        });
         toast.error("Välj en betalningsmetod");
         return;
       }
@@ -352,15 +275,57 @@ const CheckoutContent = ({
       if (pm === "bank-iban") fields.push("ibanNumber");
       if (pm === "swish") fields.push("swishNumber");
       if (pm === "paypal") fields.push("paypalEmail");
+      if (requiresPersonalNumber(config, pm) && !fields.includes("personalNumber")) fields.push("personalNumber");
 
       if (fields.length) {
         const ok = await trigger(fields, { shouldFocus: false });
         if (!ok) {
+          trackEvent("validation_error", {
+            funnel: "checkout",
+            surface: compact ? "compact" : "page",
+            step: 2,
+            checkout_step: CHECKOUT_STEP_SLUGS[2],
+            fields: fields.join(","),
+            model,
+            storage,
+            dealer: config.name,
+          });
           toast.error("Vänligen fyll i alla obligatoriska fält");
           return;
         }
       }
 
+      if (requiresPersonalNumber(config, pm) && !/^\d{8}-?\d{4}$/.test(watch("personalNumber") || "")) {
+        setError("personalNumber", {
+          type: "manual",
+          message: "Personnummer krävs för vald betalningsmetod.",
+        });
+        trackEvent("validation_error", {
+          funnel: "checkout",
+          surface: compact ? "compact" : "page",
+          step: 2,
+          checkout_step: CHECKOUT_STEP_SLUGS[2],
+          fields: "personalNumber",
+          model,
+          storage,
+          dealer: config.name,
+        });
+        toast.error("Vänligen fyll i personnummer");
+        return;
+      }
+
+      trackEvent("checkout_step_completed", {
+        funnel: "checkout",
+        surface: compact ? "compact" : "page",
+        step: 2,
+        checkout_step: CHECKOUT_STEP_SLUGS[2],
+        model,
+        storage,
+        dealer: config.name,
+        payment_method: pm,
+        shipping_option: watch("shippingOption"),
+        duration_ms: Date.now() - viewedAtRef.current,
+      });
       setCurrentStep(3);
     }
   };
@@ -369,10 +334,14 @@ const CheckoutContent = ({
     if (currentStep > 1) setCurrentStep(currentStep - 1);
   };
 
-  const priceSek = parseInt(price || "0", 10);
   const paypalFeeSek = paypalFee(priceSek);
-  const paypalNetSek = Math.max(0, priceSek - paypalFeeSek);
+  const selectedPaypalFeeSek = selectedPaymentMethod === "paypal" ? paypalFeeSek : 0;
+  const netPayoutSek = Math.max(0, priceSek - selectedPaypalFeeSek - shippingFeeSek);
+  const paypalNetSek = Math.max(0, priceSek - paypalFeeSek - shippingFeeSek);
   const estimatedPrice = price ? `${price} kr` : "–";
+  const shippingDisplayLabel = selectedStore
+    ? `${selectedShippingOption?.label}: ${selectedStore}`
+    : selectedShippingOption?.label;
 
   const submitOrder = async (data: CheckoutFormData) => {
     if (isSubmitting) return;
@@ -380,15 +349,18 @@ const CheckoutContent = ({
 
     try {
       const shipping = config.shippingOptions.find((option) => option.id === data.shippingOption);
+      const submitShippingFeeSek = shipping?.feeSek ?? 0;
+      const submitPaypalFeeSek = data.paymentMethod === "paypal" ? paypalFee(parseInt(price || "0", 10)) : 0;
+      const shippingLabel = selectedStore ? `${shipping?.label || data.shippingOption}: ${selectedStore}` : shipping?.label || data.shippingOption || "";
       const payment = config.paymentOptions.find((option) => option.id === data.paymentMethod);
       const payload = {
         model,
         storage,
         dealer_id: dealer,
         dealer_name: config.name,
-        price_sek: parseInt(price || "0", 10),
+        price_sek: Math.max(0, parseInt(price || "0", 10) - submitPaypalFeeSek - submitShippingFeeSek),
         shipping_option: data.shippingOption || "",
-        shipping_label: shipping?.label || data.shippingOption || "",
+        shipping_label: shippingLabel,
         customer: {
           first_name: data.firstName,
           last_name: data.lastName,
@@ -409,7 +381,7 @@ const CheckoutContent = ({
           paypal_email: data.paypalEmail,
         },
         condition_answers: conditionAnswers,
-        source: "cashmyphone_web" as const,
+        source: "televera_web" as const,
       };
       const optimisticOrder = makeOptimisticOrder(payload);
       const outboundPayload = { ...payload, client_order_id: optimisticOrder.order_id };
@@ -418,7 +390,7 @@ const CheckoutContent = ({
       void submitOrderRequest(outboundPayload)
         .then((response) => {
           resolvedOrder = response.order;
-          sessionStorage.setItem("cashmyphone:last-order", JSON.stringify(response.order));
+          sessionStorage.setItem("televera:last-order", JSON.stringify(response.order));
         })
         .catch((error) => {
           if (import.meta.env.DEV) console.error("Fel vid orderregistrering i bakgrunden:", error);
@@ -426,8 +398,18 @@ const CheckoutContent = ({
 
       await wait(ORDER_SUBMIT_ANIMATION_MS);
 
-      sessionStorage.setItem("cashmyphone:last-order", JSON.stringify(resolvedOrder));
+      sessionStorage.setItem("televera:last-order", JSON.stringify(resolvedOrder));
       if (savedOfferId) removeSavedOffer(savedOfferId);
+      trackEvent("order_submitted", {
+        funnel: "checkout",
+        surface: compact ? "compact" : "page",
+        model,
+        storage,
+        dealer: config.name,
+        price: payload.price_sek,
+        payment_method: data.paymentMethod,
+        shipping_option: data.shippingOption,
+      });
 
       navigate("/summary", {
         state: {
@@ -501,47 +483,49 @@ const CheckoutContent = ({
                     ))}
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      <Label htmlFor="personalNumber" className="text-sm">
-                        Personnummer
-                      </Label>
+                  {showPersonalNumberInCustomerStep && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <Label htmlFor="personalNumber" className="text-sm">
+                          Personnummer
+                        </Label>
 
-                      <div className="relative inline-flex">
-                        <button
-                          type="button"
-                          aria-label="Information om personnummer"
-                          aria-expanded={showPersonalNumberInfo}
-                          onClick={() => setShowPersonalNumberInfo((open) => !open)}
-                          onBlur={() => setTimeout(() => setShowPersonalNumberInfo(false), 120)}
-                          className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-full"
-                        >
-                          <Info className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="relative inline-flex">
+                          <button
+                            type="button"
+                            aria-label="Information om personnummer"
+                            aria-expanded={showPersonalNumberInfo}
+                            onClick={() => setShowPersonalNumberInfo((open) => !open)}
+                            onBlur={() => setTimeout(() => setShowPersonalNumberInfo(false), 120)}
+                            className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-full"
+                          >
+                            <Info className="w-3.5 h-3.5" />
+                          </button>
 
-                        {showPersonalNumberInfo && (
-                          <div className="absolute left-1/2 top-full z-50 mt-2 w-72 -translate-x-1/2 rounded-lg border border-border bg-popover p-3 text-xs leading-relaxed text-popover-foreground shadow-lg">
-                            Ditt personnummer delas endast med den återförsäljare du har valt och behandlas enligt GDPR.
-                          </div>
-                        )}
+                          {showPersonalNumberInfo && (
+                            <div className="absolute left-1/2 top-full z-50 mt-2 w-72 -translate-x-1/2 rounded-lg border border-border bg-popover p-3 text-xs leading-relaxed text-popover-foreground shadow-lg">
+                              Ditt personnummer delas endast med den återförsäljare du har valt och behandlas enligt GDPR.
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    <Input
-                      id="personalNumber"
-                      inputMode="numeric"
-                      placeholder="ÅÅÅÅMMDD-XXXX"
-                      className="h-10"
-                      {...register("personalNumber", {
-                        onChange: (event) => {
-                          setValue("personalNumber", formatPersonalNumber(event.currentTarget.value), { shouldValidate: showErrors });
-                        },
-                      })}
-                    />
-                    {showErrors && errors.personalNumber && (
-                      <p className="text-xs text-destructive">{errors.personalNumber.message}</p>
-                    )}
-                  </div>
+                      <Input
+                        id="personalNumber"
+                        inputMode="numeric"
+                        placeholder="ÅÅÅÅMMDD-XXXX"
+                        className="h-10"
+                        {...register("personalNumber", {
+                          onChange: (event) => {
+                            setValue("personalNumber", formatPersonalNumber(event.currentTarget.value), { shouldValidate: showErrors });
+                          },
+                        })}
+                      />
+                      {showErrors && errors.personalNumber && (
+                        <p className="text-xs text-destructive">{errors.personalNumber.message}</p>
+                      )}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -599,19 +583,64 @@ const CheckoutContent = ({
                       {config.shippingOptions.map((option) => {
                         const selected = watch("shippingOption") === option.id;
                         return (
-                          <button
-                            type="button"
+                          <div
                             key={option.id}
-                            onClick={() => setValue("shippingOption", selected ? "" : option.id)}
-                            className={`text-left p-3 rounded-lg border-2 transition-all ${
+                            className={`rounded-lg border-2 transition-all ${
                               selected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
                             }`}
                           >
-                            <p className="font-semibold text-sm">{option.label}</p>
-                            {option.description && (
-                              <p className="text-xs text-muted-foreground mt-0.5">{option.description}</p>
-                            )}
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setValue("shippingOption", selected ? "" : option.id);
+                                setSelectedStore("");
+                              }}
+                              className="w-full text-left p-3"
+                            >
+                              <p className="font-semibold text-sm">{option.label}</p>
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  {option.features?.length ? (
+                                    <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                                      {option.features.map((feature) => (
+                                        <li key={feature} className="flex items-center gap-1.5">
+                                          <Check className="h-3.5 w-3.5 text-primary" />
+                                          <span className="font-normal">{feature}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </div>
+                                {option.feeSek ? (
+                                  <span className="shrink-0 text-right text-xs font-semibold text-destructive">
+                                    -{option.feeSek.toLocaleString("sv-SE")} kr
+                                    <span className="block font-normal text-muted-foreground">({option.feeLabel})</span>
+                                  </span>
+                                ) : null}
+                              </div>
+                            </button>
+                            {selected && option.stores?.length ? (
+                              <div className="border-t border-primary/20 bg-primary/5 p-3">
+                                <Label className="text-sm mb-2 block">Välj butik</Label>
+                                <div className="grid gap-2 max-h-64 overflow-auto pr-1">
+                                  {option.stores.map((store) => (
+                                    <button
+                                      type="button"
+                                      key={store}
+                                      onClick={() => setSelectedStore(store)}
+                                      className={`text-left rounded-md border px-3 py-2 text-xs transition-all ${
+                                        selectedStore === store
+                                          ? "border-primary bg-primary/10 text-foreground"
+                                          : "border-border bg-background hover:border-primary/50"
+                                      }`}
+                                    >
+                                      {store}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
                         );
                       })}
                     </div>
@@ -719,6 +748,24 @@ const CheckoutContent = ({
                                     {showErrors && errors.swishNumber && (
                                       <p className="text-xs text-destructive">{errors.swishNumber.message}</p>
                                     )}
+                                    {showPersonalNumberInSwishStep && (
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Personnummer</Label>
+                                        <Input
+                                          inputMode="numeric"
+                                          placeholder="ÅÅÅÅMMDD-XXXX"
+                                          className="h-9"
+                                          {...register("personalNumber", {
+                                            onChange: (event) => {
+                                              setValue("personalNumber", formatPersonalNumber(event.currentTarget.value), { shouldValidate: showErrors });
+                                            },
+                                          })}
+                                        />
+                                        {showErrors && errors.personalNumber && (
+                                          <p className="text-xs text-destructive">{errors.personalNumber.message}</p>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 )}
 
@@ -761,9 +808,7 @@ const CheckoutContent = ({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Leveranssätt</span>
-                      <span className="font-semibold">
-                        {config.shippingOptions.find((o) => o.id === watch("shippingOption"))?.label}
-                      </span>
+                      <span className="font-semibold text-right">{shippingDisplayLabel}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Betalning</span>
@@ -781,6 +826,12 @@ const CheckoutContent = ({
                       <span className="text-muted-foreground">Estimerat belopp</span>
                       <span className="font-bold text-primary">{estimatedPrice}</span>
                     </div>
+                    {shippingFeeSek ? (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Fraktavgift</span>
+                        <span className="font-semibold">-{shippingFeeSek.toLocaleString("sv-SE")} kr</span>
+                      </div>
+                    ) : null}
                     {watch("paymentMethod") === "paypal" && (
                       <>
                         <div className="flex justify-between">
@@ -788,11 +839,17 @@ const CheckoutContent = ({
                           <span className="font-semibold">-{paypalFeeSek.toLocaleString("sv-SE")} kr</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Efter avgift</span>
+                          <span className="text-muted-foreground">Efter avgifter</span>
                           <span className="font-bold text-primary">{paypalNetSek.toLocaleString("sv-SE")} kr</span>
                         </div>
                       </>
                     )}
+                    {watch("paymentMethod") !== "paypal" && shippingFeeSek ? (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Efter avgift</span>
+                        <span className="font-bold text-primary">{netPayoutSek.toLocaleString("sv-SE")} kr</span>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="rounded-lg border border-border p-3 space-y-0.5 text-sm">
@@ -833,11 +890,11 @@ const CheckoutContent = ({
                           type="button"
                           onClick={(e) => {
                             e.preventDefault();
-                            setShowCashMyPhoneTerms(true);
+                            setShowTeleveraTerms(true);
                           }}
                           className="text-primary hover:underline font-medium"
                         >
-                          CashMyPhones
+                          Televeras
                         </button>{" "}
                         och{" "}
                         <button
@@ -875,13 +932,43 @@ const CheckoutContent = ({
                     data-loading={isSubmitting ? "true" : undefined}
                     onClick={async () => {
                       if (!watch("findMyIphoneDisabled")) {
+                        trackEvent("validation_error", {
+                          funnel: "checkout",
+                          surface: compact ? "compact" : "page",
+                          step: 3,
+                          checkout_step: CHECKOUT_STEP_SLUGS[3],
+                          fields: "findMyIphoneDisabled",
+                          model,
+                          storage,
+                          dealer: config.name,
+                        });
                         toast.error("Bekräfta att Hitta min iPhone är avaktiverad");
                         return;
                       }
                       if (!watch("termsAccepted")) {
+                        trackEvent("validation_error", {
+                          funnel: "checkout",
+                          surface: compact ? "compact" : "page",
+                          step: 3,
+                          checkout_step: CHECKOUT_STEP_SLUGS[3],
+                          fields: "termsAccepted",
+                          model,
+                          storage,
+                          dealer: config.name,
+                        });
                         toast.error("Du måste godkänna villkoren");
                         return;
                       }
+                      trackEvent("checkout_step_completed", {
+                        funnel: "checkout",
+                        surface: compact ? "compact" : "page",
+                        step: 3,
+                        checkout_step: CHECKOUT_STEP_SLUGS[3],
+                        model,
+                        storage,
+                        dealer: config.name,
+                        duration_ms: Date.now() - viewedAtRef.current,
+                      });
                       await submitOrder(getValues());
                     }}
                   >
@@ -912,7 +999,7 @@ const CheckoutContent = ({
                       <div>
                         <p className="text-sm text-muted-foreground">Fraktalternativ</p>
                         <p className="font-medium">
-                          {config.shippingOptions.find((opt) => opt.id === watch("shippingOption"))?.label}
+                          {shippingDisplayLabel}
                         </p>
                       </div>
                     )}
@@ -926,7 +1013,12 @@ const CheckoutContent = ({
                     )}
                     <div className="pt-4 border-t">
                       <p className="text-sm text-muted-foreground mb-1">Uppskattat pris</p>
-                      <p className="text-2xl font-bold text-primary">{estimatedPrice}</p>
+                      <p className="text-2xl font-bold text-primary">{netPayoutSek.toLocaleString("sv-SE")} kr</p>
+                      {(shippingFeeSek || selectedPaypalFeeSek) ? (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Efter avgifter från {priceSek.toLocaleString("sv-SE")} kr
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 </Card>
@@ -936,7 +1028,7 @@ const CheckoutContent = ({
         </form>
       </div>
 
-      <TermsDialog open={showCashMyPhoneTerms} onOpenChange={setShowCashMyPhoneTerms} type="cashmyphone" />
+      <TermsDialog open={showTeleveraTerms} onOpenChange={setShowTeleveraTerms} type="televera" />
       <TermsDialog open={showVendorTerms} onOpenChange={setShowVendorTerms} type="vendor" vendorName={config.name} />
     </>
   );

@@ -55,12 +55,12 @@ export const validatePaymentDetails = (payment: PaymentMethod | null, form: Comm
   return errors;
 };
 
-export const validateCustomerDetails = (form: CommerceCheckoutForm): CheckoutErrors => {
+export const validateCustomerDetails = (form: CommerceCheckoutForm, requirePersonalNumber = true): CheckoutErrors => {
   const errors: CheckoutErrors = {};
 
   if (isBlank(form.firstName)) errors.firstName = "Förnamn krävs.";
   if (isBlank(form.lastName)) errors.lastName = "Efternamn krävs.";
-  if (!/^\d{8}-?\d{4}$/.test(form.personalNumber.trim())) {
+  if (requirePersonalNumber && !/^\d{8}-?\d{4}$/.test(form.personalNumber.trim())) {
     errors.personalNumber = "Ange personnummer som ÅÅÅÅMMDD-XXXX.";
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {

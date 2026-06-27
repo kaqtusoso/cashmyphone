@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 
-const STORAGE_KEY = "cashmyphone-theme";
+const STORAGE_KEY = "televera-theme";
 
 const getInitialTheme = (): "light" | "dark" => {
   if (typeof window === "undefined") return "light";

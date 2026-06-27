@@ -28,9 +28,8 @@
 }
 
 .cmp-site-footer-brand img {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 132px;
+  height: auto;
 }
 
 .cmp-site-footer p {
@@ -96,9 +95,8 @@
   }
 
   .cmp-site-footer-mobile img {
-    width: 24px;
-    height: 24px;
-    border-radius: 7px;
+    width: 116px;
+    height: auto;
   }
 
   .cmp-site-footer-mobile strong {
@@ -114,6 +112,37 @@
     color: #8b93a0;
     font-size: 14px;
     line-height: 1.6;
+  }
+
+  .cmp-site-footer-mobile-links {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 24px;
+    margin-bottom: 20px;
+  }
+
+  .cmp-site-footer-mobile nav {
+    display: grid;
+    gap: 9px;
+    align-content: start;
+  }
+
+  .cmp-site-footer-mobile h3 {
+    margin: 0 0 2px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .cmp-site-footer-mobile a {
+    color: #c7ccd4;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .cmp-site-footer-mobile a:hover {
+    color: #fff;
   }
 
   .cmp-site-footer-mobile small {

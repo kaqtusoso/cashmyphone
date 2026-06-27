@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BadgePercent,
+  Check,
   ChevronDown,
-  Clock,
   Menu,
   Search,
   Shield,
@@ -14,9 +14,11 @@ import {
 } from "lucide-react";
 
 import { useIphoneCatalog } from "@/hooks/useIphoneCatalog";
+import { getIphoneImage } from "@/utils/iphoneImage";
 import { modelToSlug } from "@/utils/modelSlug";
+import { trackEvent } from "@/utils/tracking";
 
-import logoGreen from "@/assets/logo-green.png";
+import logoGreen from "@/assets/televera-logo-full.png";
 import swappieLogo from "@/assets/swappie-logo.png";
 import fixmyphoneLogo from "@/assets/fixmyphone-logo.png";
 import fixiphoneLogo from "@/assets/fixiphone-logo.png";
@@ -28,25 +30,29 @@ import telestoreLogo from "@/assets/telestore-logo.png";
 import "./MobileHome.css";
 
 const partners = [
-  swappieLogo,
-  fixmyphoneLogo,
-  fixiphoneLogo,
-  fixphoneproLogo,
-  happyphoneLogo,
-  renewedLogo,
-  phoneheroLogo,
-  telestoreLogo,
+  { src: swappieLogo, alt: "Swappie" },
+  { src: fixmyphoneLogo, alt: "FixMyPhone" },
+  { src: fixiphoneLogo, alt: "Fixiphone" },
+  { src: fixphoneproLogo, alt: "FixTech", compact: true },
+  { src: happyphoneLogo, alt: "HappyPhone" },
+  { src: renewedLogo, alt: "reNewed" },
+  { src: phoneheroLogo, alt: "PhoneHero", className: "phonehero" },
+  { src: telestoreLogo, alt: "Telestore" },
 ];
+
+const marqueeGroups = Array.from({ length: 5 }, (_, index) => index);
+
+const trustChips = ["Tar 30 sekunder", "Bud direkt", "8+ återförsäljare"];
 
 const steps = [
   {
     title: "Sök & jämför bud",
-    text: "Skriv in din modell och se bud från flera återförsäljare direkt - på sekunder.",
+    text: "Skriv in modell, skick och lagring och se bud från flera återförsäljare direkt.",
     icon: Search,
   },
   {
     title: "Välj & skicka",
-    text: "Välj det bästa budet och skicka telefonen gratis med en förbetald fraktsedel.",
+    text: "Välj det bästa budet och följ köparens instruktioner för inlämning eller frakt.",
     icon: Truck,
   },
   {
@@ -59,17 +65,17 @@ const steps = [
 const values = [
   {
     title: "Alla bud på ett ställe",
-    text: "Vi frågar flera återförsäljare åt dig, så du slipper mejla runt och jämföra själv.",
+    text: "Vi samlar bud från flera återförsäljare åt dig, så du slipper leta runt själv.",
     icon: Scale,
   },
   {
     title: "Det kostar dig inget",
-    text: "Vi köper inte din telefon - vi hittar köparen som betalar bäst. Du betalar aldrig en krona.",
+    text: "Vi köper inte din telefon. Vi hittar köparen som betalar bäst för din mobil helt gratis.",
     icon: BadgePercent,
   },
   {
     title: "Tryggt hela vägen",
-    text: "Spårbar frakt, köpare vi känner till och utbetalning via Swish eller bank.",
+    text: "Vi har granskat alla köpare så att du kan känna dig trygg genom processen.",
     icon: Shield,
   },
 ];
@@ -77,19 +83,27 @@ const values = [
 const faqs = [
   {
     q: "Köper ni telefonen själva?",
-    a: "Nej. Vi jämför bud från återförsäljare och skickar dig vidare till den köpare du väljer.",
-  },
-  {
-    q: "Vad kostar det?",
-    a: "Det är gratis att jämföra bud och frakten är förbetald när du säljer via en köpare i flödet.",
+    a: "Nej, det gör vi inte. Vi visar vilka återförsäljare som vill ha din mobil och vad de betalar. Du säljer sedan direkt till den du gillar bäst.",
   },
   {
     q: "Hur snabbt får jag pengarna?",
-    a: "Efter att köparen har kontrollerat mobilen betalas pengarna vanligtvis ut inom några arbetsdagar.",
+    a: "När köparen fått, granskat och godkänt skicket på din telefon betalar de ut enligt det betalningssätt du har valt. Utbetalningstiden beror på återförsäljaren, men generellt brukar det ta runt 4-5 dagar från att du skickat paketet.",
   },
   {
-    q: "Vad händer om skicket inte stämmer?",
-    a: "Köparen kan ge ett nytt bud efter kontroll. Om du tackar nej skickas mobilen tillbaka enligt köparens villkor.",
+    q: "Vad kostar det?",
+    a: "Det kostar inget att jämföra bud hos Televera. Eventuella frakt- och hanteringsvillkor kan tillkomma av köparen du väljer.",
+  },
+  {
+    q: "Hur skickar jag telefonen?",
+    a: "Det beror på köparen du väljer. Vissa erbjuder fraktsedel, andra kan ha inlämning i butik eller egna instruktioner. Instruktioner för hur du skickar in din telefon skickas alltid med i samband med orderbekräftelsen via mail.",
+  },
+  {
+    q: "Tänk om budet ändras när de kollat mobilen?",
+    a: "Om skicket inte stämmer med det du angett får du ett nytt bud. Säger du nej har du rätt till att köparen skickar tillbaka telefonen enligt köparens villkor.",
+  },
+  {
+    q: "Hur betalas pengarna ut?",
+    a: "När du har värderat din telefon och valt en köpare att gå vidare med listas betalningssätten som de erbjuder. Oftast erbjuds vara Swish eller banköverföring, men andra betalningsmetoder som PayPal kan även finnas tillgängliga.",
   },
 ];
 
@@ -105,6 +119,7 @@ const Highlight = ({ children }: { children: React.ReactNode }) => (
 const MobileHome = () => {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchStartedTrackedRef = useRef(false);
   const [query, setQuery] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -129,10 +144,39 @@ const MobileHome = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const sectionFromHash = window.location.hash.replace(/^#/, "");
+    let sectionFromStorage = "";
+
+    try {
+      sectionFromStorage = window.sessionStorage.getItem("televera:home-section") ?? "";
+      window.sessionStorage.removeItem("televera:home-section");
+    } catch {
+      sectionFromStorage = "";
+    }
+
+    const target = sectionFromStorage || sectionFromHash;
+    if (!["how", "why", "faq"].includes(target)) return;
+
+    let attempts = 0;
+    const scrollToSection = () => {
+      const element = document.getElementById(target);
+      if (!element) {
+        if (attempts++ < 20) window.setTimeout(scrollToSection, 50);
+        return;
+      }
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.history.replaceState(null, "", `/#${target}`);
+      setMenuOpen(false);
+    };
+
+    window.requestAnimationFrame(scrollToSection);
+  }, []);
+
   const filteredModels = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle || selectedModel) return [];
-    return iphoneModels.filter((model) => model.toLowerCase().includes(needle)).slice(0, 7);
+    return iphoneModels.filter((model) => model.toLowerCase().includes(needle));
   }, [iphoneModels, query, selectedModel]);
 
   const startFlow = (model = selectedModel) => {
@@ -150,15 +194,42 @@ const MobileHome = () => {
     setSelectedModel(model);
     setQuery(model);
     setSearchOpen(false);
+    trackEvent("model_selected", {
+      funnel: "quote",
+      surface: "mobile",
+      entry_point: "home_search",
+      model,
+    });
+    trackEvent("quote_started", {
+      funnel: "quote",
+      surface: "mobile",
+      entry_point: "home_search",
+      model,
+    });
+  };
+
+  const trackSearchStarted = () => {
+    if (searchStartedTrackedRef.current) return;
+    searchStartedTrackedRef.current = true;
+    trackEvent("quote_search_started", {
+      funnel: "quote",
+      surface: "mobile",
+      entry_point: "home_search",
+    });
+  };
+
+  const handleSellNow = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.setTimeout(() => startFlow(), 160);
   };
 
   return (
     <div className="cmp-mobile-home">
       <header className={`cmp-mobile-nav ${navState}`}>
-        <a className="cmp-mobile-brand" href="#top" aria-label="CashMyPhone startsida">
+        <a className="cmp-mobile-brand" href="#top" aria-label="Televera startsida">
           <img src={logoGreen} alt="" />
         </a>
-        <button type="button" className="cmp-mobile-sell" onClick={() => startFlow("iPhone 15 Pro")}>
+        <button type="button" className="cmp-mobile-sell" onClick={handleSellNow}>
           Sälj nu
         </button>
         <button
@@ -173,18 +244,20 @@ const MobileHome = () => {
 
       {menuOpen ? (
         <nav className="cmp-mobile-menu" aria-label="Mobilmeny">
-          <a href="#how" onClick={() => setMenuOpen(false)}>Så funkar det</a>
-          <a href="#why" onClick={() => setMenuOpen(false)}>Varför oss</a>
-          <a href="#faq" onClick={() => setMenuOpen(false)}>Vanliga frågor</a>
+          <a href="https://televera.se/#how" onClick={() => setMenuOpen(false)}>Så funkar det</a>
+          <a href="https://televera.se/#why" onClick={() => setMenuOpen(false)}>Varför oss</a>
+          <a href="https://televera.se/#faq" onClick={() => setMenuOpen(false)}>Vanliga frågor</a>
+          <a href="/artiklar" onClick={() => setMenuOpen(false)}>Artiklar</a>
+          <a href="/om-oss" onClick={() => setMenuOpen(false)}>Om oss</a>
         </nav>
       ) : null}
 
       <section className="cmp-mobile-hero" id="top">
         <div className="cmp-mobile-hero-inner">
           <h1>
-            Hitta <Highlight>bästa priset</Highlight> för din
+            Hitta <Highlight>bästa priset</Highlight>
             <br />
-            mobil
+            för din mobil
           </h1>
           <p className="cmp-mobile-hand">helt gratis!</p>
 
@@ -198,10 +271,12 @@ const MobileHome = () => {
                 setQuery(event.target.value);
                 setSelectedModel("");
                 setSearchOpen(true);
+                trackSearchStarted();
               }}
               onFocus={() => {
                 window.scrollTo({ top: 0, behavior: "instant" });
                 setSearchOpen(Boolean(query.trim()));
+                trackSearchStarted();
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") startFlow();
@@ -214,35 +289,52 @@ const MobileHome = () => {
               <div className="cmp-mobile-search-menu">
                 {filteredModels.map((model) => (
                   <button key={model} type="button" onMouseDown={() => chooseModel(model)}>
-                    {model}
+                    <span className="cmp-mobile-search-thumb" aria-hidden>
+                      <img src={getIphoneImage(model)} alt="" loading="lazy" decoding="async" />
+                    </span>
+                    <span>{model}</span>
                   </button>
                 ))}
               </div>
             ) : null}
           </div>
 
-          <div className="cmp-mobile-pills" aria-label="Fördelar">
-            <span><Clock aria-hidden /> Tar 30 sek</span>
-            <span><Wallet aria-hidden /> Swish / bank</span>
-            <span><Truck aria-hidden /> Fri frakt</span>
+          <div className="cmp-mobile-trust-chips" aria-label="Fördelar">
+            {trustChips.map((item) => (
+              <span key={item}>
+                <Check aria-hidden />
+                {item}
+              </span>
+            ))}
           </div>
         </div>
       </section>
 
       <section className="cmp-mobile-partners" aria-label="Partners">
         <p>Vi jämför bud från Sveriges återförsäljare</p>
-        <div>
-          {[...partners, ...partners].map((logo, index) => (
-            <span key={`${logo}-${index}`}>
-              <img src={logo} alt="" />
-            </span>
+        <div className="cmp-mobile-partners-track">
+          {marqueeGroups.map((groupIndex) => (
+            <div
+              className="cmp-mobile-partners-group"
+              key={groupIndex}
+              aria-hidden={groupIndex === 1}
+            >
+              {partners.map((partner) => (
+                <span
+                  className={[partner.compact ? "compact" : "", partner.className ?? ""]
+                    .filter(Boolean)
+                    .join(" ") || undefined}
+                  key={`${partner.alt}-${groupIndex}`}
+                >
+                  <img src={partner.src} alt={groupIndex === 0 ? partner.alt : ""} />
+                </span>
+              ))}
+            </div>
           ))}
         </div>
       </section>
 
       <section className="cmp-mobile-section cmp-mobile-how" id="how">
-        <p className="cmp-mobile-kicker">Så funkar det</p>
-        <h2>Tre enkla steg</h2>
         {steps.map((step, index) => {
           const Icon = step.icon;
           return (
@@ -295,7 +387,7 @@ const MobileHome = () => {
       <section className="cmp-mobile-final-cta">
         <h2>Redo att sälja din mobil?</h2>
         <p>Se bud från flera återförsäljare på ett par minuter.</p>
-        <button type="button" onClick={() => startFlow("iPhone 15 Pro")}>
+        <button type="button" onClick={handleSellNow}>
           <Search aria-hidden /> Jämför bud nu
         </button>
         <span>helt gratis!</span>
@@ -304,10 +396,29 @@ const MobileHome = () => {
       <footer className="cmp-mobile-footer">
         <div>
           <img src={logoGreen} alt="" />
-          <strong>CashMyPhone</strong>
         </div>
         <p>Vi hjälper dig sälja din telefon till återförsäljaren som betalar bäst. Gratis, utan krångel.</p>
-        <small>© 2026 CashMyPhone. Alla rättigheter förbehållna.</small>
+        <div className="cmp-mobile-footer-links">
+          <nav aria-label="Tjänsten">
+            <h3>Tjänsten</h3>
+            <a href="https://televera.se/#how">Så funkar det</a>
+            <a href="https://televera.se/#why">Varför oss</a>
+            <a href="https://televera.se/#faq">Vanliga frågor</a>
+          </nav>
+          <nav aria-label="Företaget">
+            <h3>Företaget</h3>
+            <a href="/om-oss">Om oss</a>
+            <a href="/artiklar">Artiklar</a>
+            <a href="mailto:info@televera.se">Kontakt</a>
+          </nav>
+          <nav aria-label="Juridik">
+            <h3>Juridik</h3>
+            <a href="/villkor">Villkor</a>
+            <a href="/integritet">Integritet</a>
+            <a href="/cookies">Cookies</a>
+          </nav>
+        </div>
+        <small>© 2026 Televera. Alla rättigheter förbehållna.</small>
       </footer>
     </div>
   );

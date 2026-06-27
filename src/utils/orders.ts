@@ -3,7 +3,7 @@ import { API_URL } from "@/utils/apiClient";
 export interface OrderCustomer {
   first_name: string;
   last_name: string;
-  personal_number: string;
+  personal_number?: string;
   address: string;
   postal_code: string;
   city: string;
@@ -28,12 +28,13 @@ export interface OrderCreatePayload {
   dealer_id: string;
   dealer_name: string;
   price_sek: number;
+  bid_difference_sek?: number;
   shipping_option: string;
   shipping_label: string;
   customer: OrderCustomer;
   payment: OrderPayment;
   condition_answers?: Record<string, unknown>;
-  source: "cashmyphone_web";
+  source: "televera_web";
 }
 
 export interface IntegrationStatus {
@@ -53,13 +54,11 @@ export interface OrderCreateResponse {
 }
 
 const makeOrderId = () => {
-  const date = new Date();
-  const yyyymmdd = date.toISOString().slice(0, 10).replace(/-/g, "");
-  const random = Array.from(crypto.getRandomValues(new Uint8Array(4)))
+  const random = Array.from(crypto.getRandomValues(new Uint8Array(5)))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("")
     .toUpperCase();
-  return `CMP-${yyyymmdd}-${random}`;
+  return `TLV-${random}`;
 };
 
 export const makeOptimisticOrder = (payload: OrderCreatePayload): Order => {
