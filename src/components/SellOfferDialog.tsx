@@ -9,6 +9,7 @@ interface SellOfferDialogProps {
   offer: CompanyOffer | null;
   model: string;
   storage: string;
+  color?: string;
   conditionAnswers?: ConditionAnswers;
   savedOfferId?: string;
 }
@@ -33,6 +34,7 @@ const SellOfferDialog = ({
   offer,
   model,
   storage,
+  color,
   conditionAnswers,
   savedOfferId,
 }: SellOfferDialogProps) => {
@@ -59,6 +61,7 @@ const SellOfferDialog = ({
             dealer={dealerId}
             model={model}
             storage={storage}
+            color={color}
             price={String(offer.pris)}
             conditionAnswers={conditionAnswers as unknown as Record<string, unknown>}
             savedOfferId={savedOfferId}

@@ -5,6 +5,7 @@ export interface SavedOffer {
   id: string;
   model: string;
   storage: string;
+  color?: string;
   condition: ConditionAnswers;
   offers: CompanyOffer[] | null;
   selectedOffer?: CompanyOffer | null;

@@ -720,7 +720,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
 
     const saved = state.restoreFromSavedOffer;
     setModel(saved.model);
-    setColor("");
+    setColor(saved.color ?? "");
     setStorage(saved.storage);
     const restoredCondition = saved.condition ?? defaultAnswers;
     setAnswers(restoredCondition);
@@ -897,6 +897,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
       id,
       model,
       storage,
+      color,
       condition: answers,
       offers: results,
       selectedOffer: offer,

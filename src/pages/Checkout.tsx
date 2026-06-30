@@ -47,6 +47,7 @@ const Checkout = () => {
       const params = new URLSearchParams(searchParams);
       params.set("model", savedOffer.model);
       params.set("storage", savedOffer.storage);
+      if (savedOffer.color) params.set("color", savedOffer.color);
       params.set("price", offerToUse.pris.toString());
 
       params.set("dealer", getDealerId(offerToUse.företag));
@@ -64,6 +65,7 @@ const Checkout = () => {
   const dealer = searchParams.get("dealer") || "swappie";
   const model = searchParams.get("model");
   const storage = searchParams.get("storage");
+  const color = searchParams.get("color") || location.state?.restoreFromSavedOffer?.color || "";
   const price = searchParams.get("price");
 
   if ((!model || !storage || !price) && !location.state?.restoreFromSavedOffer) {
@@ -91,6 +93,7 @@ const Checkout = () => {
           dealer={dealerKey}
           model={model || ""}
           storage={storage || ""}
+          color={color}
           price={price || ""}
           conditionAnswers={conditionAnswers}
           savedOfferId={savedOfferId}

@@ -153,16 +153,22 @@ def _format_condition_answers(condition_answers: dict[str, Any] | None, color: s
     }
 
     rows: list[str] = []
-    if color:
-        rows.append(f"Färg: {color}")
     if not condition_answers:
+        if color:
+            rows.append(f"Färg: {color}")
         return "\n".join(rows)
 
-    for key in ("batteryHealth", "screenGlass", "screenWear", "sidesWear", "backWear"):
+    battery_health = condition_answers.get("batteryHealth")
+    if battery_health is not None:
+        rows.append(f"{labels['batteryHealth']}: {battery_health}%")
+    if color:
+        rows.append(f"Färg: {color}")
+
+    for key in ("screenGlass", "screenWear", "sidesWear", "backWear"):
         value = condition_answers.get(key)
         if value is None:
             continue
-        formatted_value = f"{value}%" if key == "batteryHealth" else value_labels.get(str(value), str(value))
+        formatted_value = value_labels.get(str(value), str(value))
         rows.append(f"{labels[key]}: {formatted_value}")
 
     functional = condition_answers.get("functional")

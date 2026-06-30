@@ -13,6 +13,7 @@ import { Check, Info } from "lucide-react";
 import TermsDialog from "@/components/TermsDialog";
 import { useSavedOffers } from "@/hooks/useSavedOffers";
 import { formatPersonalNumber } from "@/utils/checkoutValidation";
+import { getIphoneColorLabel } from "@/utils/iphoneImage";
 import { makeOptimisticOrder, pendingOrderIntegrations, submitOrder as submitOrderRequest } from "@/utils/orders";
 import { dealerConfig, requiresPersonalNumber } from "@/utils/vendorCheckout";
 import { trackEvent, trackStepView } from "@/utils/tracking";
@@ -83,6 +84,7 @@ export interface CheckoutContentProps {
   dealer: string;
   model: string;
   storage: string;
+  color?: string;
   price: string;
   conditionAnswers?: Record<string, unknown>;
   savedOfferId?: string;
@@ -99,6 +101,7 @@ const CheckoutContent = ({
   dealer,
   model,
   storage,
+  color,
   price,
   conditionAnswers,
   savedOfferId,
@@ -356,6 +359,7 @@ const CheckoutContent = ({
       const payload = {
         model,
         storage,
+        color: getIphoneColorLabel(model, color),
         dealer_id: dealer,
         dealer_name: config.name,
         price_sek: Math.max(0, parseInt(price || "0", 10) - submitPaypalFeeSek - submitShippingFeeSek),
