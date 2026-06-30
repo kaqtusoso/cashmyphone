@@ -17,7 +17,7 @@ import {
 import SiteFooter from "@/components/SiteFooter";
 import { CompanyOffer } from "@/types/offers";
 import { makeOptimisticOrder, Order, submitOrder } from "@/utils/orders";
-import { getIphoneImage } from "@/utils/iphoneImage";
+import { getIphoneColorLabel, getIphoneImage } from "@/utils/iphoneImage";
 import {
   CheckoutErrors,
   CheckoutField,
@@ -478,6 +478,7 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
       const payload = {
         model,
         storage,
+        color: getIphoneColorLabel(model, color),
         dealer_id: dealerIdFromName(activeOffer.företag),
         dealer_name: activeOffer.företag,
         price_sek: payoutAmount(activeOffer, payment, shippingFeeSek),

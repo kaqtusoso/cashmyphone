@@ -68,6 +68,7 @@ class OrderCreate(BaseModel):
     client_order_id: str | None = None
     model: str = Field(min_length=1)
     storage: str = Field(min_length=1)
+    color: str | None = None
     dealer_id: str = Field(min_length=1)
     dealer_name: str = Field(min_length=1)
     price_sek: int = Field(ge=0)
@@ -124,10 +125,7 @@ def _format_payment_details(payment: OrderPayment) -> str:
     return "\n".join(details)
 
 
-def _format_condition_answers(condition_answers: dict[str, Any] | None) -> str:
-    if not condition_answers:
-        return ""
-
+def _format_condition_answers(condition_answers: dict[str, Any] | None, color: str | None = None) -> str:
     labels = {
         "batteryHealth": "Batterihälsa",
         "screenGlass": "Skärmglas",
@@ -155,6 +153,11 @@ def _format_condition_answers(condition_answers: dict[str, Any] | None) -> str:
     }
 
     rows: list[str] = []
+    if color:
+        rows.append(f"Färg: {color}")
+    if not condition_answers:
+        return "\n".join(rows)
+
     for key in ("batteryHealth", "screenGlass", "screenWear", "sidesWear", "backWear"):
         value = condition_answers.get(key)
         if value is None:
@@ -206,7 +209,7 @@ def _sheet_row(order: OrderOut) -> dict[str, Any]:
         "postal_code": order.customer.postal_code,
         "city": order.customer.city,
         "payment_details": _format_payment_details(order.payment),
-        "condition_answers": _format_condition_answers(order.condition_answers),
+        "condition_answers": _format_condition_answers(order.condition_answers, order.color),
     }
 
 

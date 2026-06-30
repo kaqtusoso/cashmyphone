@@ -25,6 +25,7 @@ export interface OrderCreatePayload {
   client_order_id?: string;
   model: string;
   storage: string;
+  color?: string;
   dealer_id: string;
   dealer_name: string;
   price_sek: number;

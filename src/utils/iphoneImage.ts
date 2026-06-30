@@ -174,6 +174,11 @@ export const getIphoneColorOptions = (model: string): IphoneColorOption[] => {
   return options?.length ? options : colorOptionsByModel.iphone_15 ?? [];
 };
 
+export const getIphoneColorLabel = (model: string, color?: string) => {
+  if (!color) return "";
+  return getIphoneColorOptions(model).find((option) => option.value === color)?.label ?? colorLabels[color] ?? titleCase(color);
+};
+
 export const getDefaultIphoneColor = (model: string) => {
   const options = getIphoneColorOptions(model);
   return neutralPreference.find((color) => options.some((option) => option.value === color)) ?? options[0]?.value ?? "";
