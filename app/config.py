@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     scrape_cron_hours: str = "0,6,12,18"
     scrape_timezone: str = "Europe/Stockholm"
     scrape_stale_after_hours: int = 8
+    used_phone_catalog_cron_hours: str = "1,7,13,19"
+    used_phone_catalog_update_on_startup: bool = True
     request_timeout_seconds: int = 30
     playwright_headless: bool = True
     allowed_origins: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,https://televera.se"
