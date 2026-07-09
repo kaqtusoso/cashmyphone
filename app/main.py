@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from .database import init_db
 from .scheduler import setup_scheduler, scheduler, scrape_if_prices_empty
-from .routers import orders, prices
+from .routers import orders, prices, used_phones
 from .config import settings
 
 logging.basicConfig(
@@ -51,6 +51,7 @@ app.add_middleware(
 
 app.include_router(prices.router)
 app.include_router(orders.router)
+app.include_router(used_phones.router)
 
 
 @app.get("/health", tags=["system"])
@@ -73,6 +74,9 @@ async def root():
             "/api/retailers",
             "/api/quote",
             "/api/orders",
+            "/api/used-phones",
+            "/api/used-phones/models",
+            "/api/used-phones/status",
             "/api/scrape",
             "/api/scrape/status",
             "/api/import-prices/{retailer}",
