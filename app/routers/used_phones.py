@@ -109,7 +109,24 @@ def _load_catalog() -> dict[str, Any]:
             "models": [],
             "offers": [],
         }
-    return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    if _catalog_needs_condition_rebuild(catalog):
+        try:
+            from scripts.update_used_phone_catalog import rebuild_catalog
+
+            rebuild_catalog()
+            catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return catalog
+
+
+def _catalog_needs_condition_rebuild(catalog: dict[str, Any]) -> bool:
+    offers = catalog.get("offers") or []
+    filter_options = catalog.get("filter_options") or {}
+    if not offers:
+        return False
+    return "condition_class" not in offers[0] or not filter_options.get("condition_classes")
 
 
 def _parse_battery_percent(value: str | None) -> int | None:
