@@ -26,6 +26,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.pricing.iphone_catalog import VALID_STORAGE_BY_MODEL_GB, is_valid_storage_for_model
+from scripts.used_phone_conditions import CONDITION_CLASSES, map_used_phone_condition
 
 
 DEFAULT_INPUT_DIR = Path("data/retail_prices")
@@ -195,6 +196,7 @@ def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | 
 
     condition_raw = _clean_text(row.get("condition_grade"))
     condition_tier = normalize_condition_tier(condition_raw)
+    condition_mapping = map_used_phone_condition(retailer, condition_raw)
     battery_type = _clean_text(row.get("battery_type"))
     battery_health = extract_battery_health(row.get("battery_health"), row.get("color"), row.get("condition_grade"))
     reference_price_sek = parse_int(row.get("reference_price_sek"))
@@ -212,7 +214,12 @@ def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | 
         "color": normalize_color(row.get("color")),
         "condition_raw": condition_raw,
         "condition_tier": condition_tier,
-        "condition_label": CONDITION_LABEL_BY_TIER[condition_tier],
+        "condition_label": condition_mapping.condition_label,
+        "condition_class": condition_mapping.condition_class,
+        "condition_rank": condition_mapping.condition_rank,
+        "condition_mapping_confidence": condition_mapping.confidence,
+        "condition_source_note": condition_mapping.source_note,
+        "legacy_condition_label": CONDITION_LABEL_BY_TIER[condition_tier],
         "battery_type": battery_type,
         "battery_health": battery_health,
         "has_new_battery": bool(battery_type and "nytt batteri" in battery_type.lower()),
@@ -269,6 +276,11 @@ def build_model_summaries(offers: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "max_price_sek": max(prices),
                 "storage_options_gb": sorted({offer["storage_gb"] for offer in model_offers if offer["storage_gb"] is not None}),
                 "condition_tiers": sorted({offer["condition_tier"] for offer in model_offers}),
+                "condition_classes": sorted(
+                    {offer["condition_class"] for offer in model_offers},
+                    key=lambda value: CONDITION_CLASSES[value]["rank"],
+                    reverse=True,
+                ),
                 "colors": sorted({offer["color"] for offer in model_offers if offer["color"]}),
             }
         )
@@ -289,6 +301,15 @@ def build_filter_options(offers: list[dict[str, Any]]) -> dict[str, Any]:
             )
         ],
         "storage_options_gb": sorted({offer["storage_gb"] for offer in offers if offer["storage_gb"] is not None}),
+        "condition_classes": [
+            {"value": condition_class, "label": config["label"], "rank": config["rank"]}
+            for condition_class, config in sorted(
+                CONDITION_CLASSES.items(),
+                key=lambda item: item[1]["rank"],
+                reverse=True,
+            )
+            if condition_class != "unknown" and any(offer["condition_class"] == condition_class for offer in offers)
+        ],
         "condition_tiers": [
             {"value": tier, "label": label}
             for tier, label in CONDITION_LABEL_BY_TIER.items()
@@ -329,6 +350,11 @@ def write_csv_catalog(output_dir: Path, offers: list[dict[str, Any]]) -> Path:
         "condition_raw",
         "condition_tier",
         "condition_label",
+        "condition_class",
+        "condition_rank",
+        "condition_mapping_confidence",
+        "condition_source_note",
+        "legacy_condition_label",
         "battery_type",
         "battery_health",
         "has_new_battery",
@@ -348,6 +374,32 @@ def write_csv_catalog(output_dir: Path, offers: list[dict[str, Any]]) -> Path:
     return path
 
 
+def build_condition_audit(offers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    audit: dict[tuple[str, str | None, str, str], int] = {}
+    for offer in offers:
+        key = (
+            offer["retailer"],
+            offer.get("condition_raw"),
+            offer["condition_class"],
+            offer["condition_mapping_confidence"],
+        )
+        audit[key] = audit.get(key, 0) + 1
+
+    return [
+        {
+            "retailer": retailer,
+            "condition_raw": condition_raw,
+            "condition_class": condition_class,
+            "confidence": confidence,
+            "offers": count,
+        }
+        for (retailer, condition_raw, condition_class, confidence), count in sorted(
+            audit.items(),
+            key=lambda item: (item[0][0], CONDITION_CLASSES[item[0][2]]["rank"] * -1, str(item[0][1])),
+        )
+    ]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build Televera's normalized used-phone catalog")
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
@@ -361,6 +413,18 @@ def main() -> None:
     print(f"Wrote {len(offers)} offers across {len(models)} models")
     print(f"JSON: {json_path}")
     print(f"CSV: {csv_path}")
+    flagged = [
+        row
+        for row in build_condition_audit(offers)
+        if row["condition_class"] == "unknown" or row["confidence"] != "high"
+    ]
+    if flagged:
+        print("Condition mappings to review:")
+        for row in flagged:
+            print(
+                "  {retailer}: {condition_raw!r} -> {condition_class} "
+                "({confidence}, {offers} offers)".format(**row)
+            )
 
 
 if __name__ == "__main__":

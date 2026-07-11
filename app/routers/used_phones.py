@@ -29,6 +29,11 @@ class UsedPhoneOffer(BaseModel):
     condition_raw: Optional[str] = None
     condition_tier: str
     condition_label: str
+    condition_class: Optional[str] = None
+    condition_rank: Optional[int] = None
+    condition_mapping_confidence: Optional[str] = None
+    condition_source_note: Optional[str] = None
+    legacy_condition_label: Optional[str] = None
     battery_type: Optional[str] = None
     battery_health: Optional[str] = None
     has_new_battery: bool = False
@@ -53,6 +58,7 @@ class UsedPhoneModelSummary(BaseModel):
     max_price_sek: int
     storage_options_gb: list[int]
     condition_tiers: list[str]
+    condition_classes: list[str] = Field(default_factory=list)
     colors: list[str]
 
 
@@ -93,7 +99,13 @@ def _load_catalog() -> dict[str, Any]:
             "generated_at": None,
             "total_offers": 0,
             "source_files": [],
-            "filter_options": {"models": [], "retailers": [], "storage_options_gb": [], "condition_tiers": []},
+            "filter_options": {
+                "models": [],
+                "retailers": [],
+                "storage_options_gb": [],
+                "condition_classes": [],
+                "condition_tiers": [],
+            },
             "models": [],
             "offers": [],
         }
