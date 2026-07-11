@@ -23,6 +23,9 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 | `GET /api/prices/best` | Bästa bud per modell/lagring/skick |
 | `GET /api/models` | Lista alla tillgängliga modeller |
 | `GET /api/retailers` | Lista aktiva återförsäljare |
+| `GET /api/used-phones` | Filtrerad köp-katalog för begagnade iPhones |
+| `GET /api/used-phones/catalog` | Hela aktuella köp-katalogen från storefront-snapshots |
+| `GET /api/used-phones/status` | Status för köp-katalogen |
 | `POST /api/quote` | Returnerar bästa bud för ett formulärsvar |
 | `GET /api/scrape/status` | Status, senaste körning och stale-flagga per scraper |
 | `POST /api/scrape` | Trigga manuell scraping (kräver `X-API-Key` header) |
@@ -75,6 +78,8 @@ Kontaktformuläret är förberett för Supabase Edge Functions, men mejlutskick 
 SCRAPE_API_KEY=din-hemliga-nyckel
 DATABASE_URL=sqlite+aiosqlite:////app/data/televera.db
 SCRAPE_CRON_HOURS=0,6,12,18
+USED_PHONE_CATALOG_CRON_HOURS=1,7,13,19
+USED_PHONE_CATALOG_UPDATE_ON_STARTUP=true
 SCRAPE_TIMEZONE=Europe/Stockholm
 SCRAPE_STALE_AFTER_HOURS=8
 PLAYWRIGHT_HEADLESS=true
@@ -85,6 +90,12 @@ Railway Postgres behövs inte för nuvarande prisdataflöde. API:t läser bara d
 senaste aktiva prislistan, och varje lyckad scraping ersätter återförsäljarens
 gamla prisrader. Det gör en liten SQLite-databas på persistent volume till ett
 billigare alternativ än en 24/7 Postgres-container.
+
+Köp-katalogen för `/kop-begagnad-iphone` uppdateras separat från säljpriserna.
+Railway kör storefront-scrapers enligt `USED_PHONE_CATALOG_CRON_HOURS`, skriver
+om varje retailers snapshot under `/app/data/retail_prices`, bygger om
+`used_phone_catalog_latest.json`, och frontenden läser den live via
+`GET /api/used-phones/catalog`.
 
 ## Exempelfrågor
 

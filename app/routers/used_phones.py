@@ -68,6 +68,15 @@ class UsedPhoneListResponse(BaseModel):
     offers: list[UsedPhoneOffer]
 
 
+class UsedPhoneCatalogResponse(BaseModel):
+    generated_at: Optional[str]
+    total_offers: int
+    source_files: list[dict[str, Any]]
+    filter_options: dict[str, Any]
+    models: list[UsedPhoneModelSummary]
+    offers: list[UsedPhoneOffer]
+
+
 class UsedPhoneCatalogStatus(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
@@ -207,6 +216,19 @@ async def list_used_phones(
         filter_options=catalog.get("filter_options", {}),
         models=catalog.get("models", []),
         offers=page,
+    )
+
+
+@router.get("/catalog", response_model=UsedPhoneCatalogResponse, summary="Hämta hela begagnat-katalogen")
+async def get_used_phone_catalog():
+    catalog = _load_catalog()
+    return UsedPhoneCatalogResponse(
+        generated_at=catalog.get("generated_at"),
+        total_offers=catalog.get("total_offers", 0),
+        source_files=catalog.get("source_files", []),
+        filter_options=catalog.get("filter_options", {}),
+        models=catalog.get("models", []),
+        offers=catalog.get("offers", []),
     )
 
 
