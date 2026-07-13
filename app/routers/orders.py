@@ -668,6 +668,91 @@ async def refresh_order_sheet_layout(x_api_key: str = Header(..., alias="X-API-K
         return IntegrationStatus(configured=True, ok=False, message=str(exc))
 
 
+def _confirmation_steps(order: OrderOut) -> list[tuple[str, str]]:
+    dealer_name = order.dealer_name
+    payment_label = order.payment.label
+    shipping_option = order.shipping_option.strip().lower()
+
+    payment_text = (
+        f"{dealer_name} kontrollerar mobilen och betalar via {payment_label} "
+        "efter godkänd kontroll."
+    )
+
+    if shipping_option == "sales-package":
+        return [
+            ("Invänta paket", f"{dealer_name} skickar försäljningspaketet till din adress."),
+            ("Packa & skicka", "Förbered mobilen och följ instruktionerna i paketet."),
+            ("Betalning", payment_text),
+        ]
+
+    if shipping_option == "email-label":
+        return [
+            ("Invänta frakt", f"{dealer_name} skickar digitala fraktinstruktioner till dig."),
+            ("Packa & lämna", "Följ instruktionerna och lämna paketet hos angivet ombud."),
+            ("Betalning", payment_text),
+        ]
+
+    if shipping_option == "store-dropoff":
+        _, separator, selected_store = order.shipping_label.partition(":")
+        destination = selected_store.strip() if separator else order.shipping_label
+        return [
+            ("Lämna i butik", f"Ta med den förberedda mobilen till {destination}."),
+            ("Kontroll", f"{dealer_name} kontrollerar mobilen i butik."),
+            ("Betalning", f"Utbetalning sker via {payment_label} efter godkänd kontroll."),
+        ]
+
+    return [
+        ("Följ instruktionerna", f"Följ fraktinstruktionerna från {dealer_name}."),
+        ("Kontroll", f"{dealer_name} kontrollerar mobilen när den har kommit fram."),
+        ("Betalning", f"Utbetalning sker via {payment_label} efter godkänd kontroll."),
+    ]
+
+
+def _confirmation_timeline_markup(steps: list[tuple[str, str]]) -> str:
+    rows: list[str] = []
+    for index, (title, description) in enumerate(steps, start=1):
+        if index == 1:
+            circle_style = "background:#15bd80;color:#ffffff;border:2px solid #15bd80;"
+        else:
+            circle_style = "background:#ffffff;color:#15bd80;border:2px solid #c0e6d2;"
+
+        connector = (
+            '<div style="width:2px;height:54px;background:#dfe6df;margin:0 auto;font-size:0;line-height:0;">&nbsp;</div>'
+            if index < len(steps)
+            else ""
+        )
+        text_padding = "2px 0 18px 14px" if index < len(steps) else "2px 0 0 14px"
+        rows.append(
+            f"""
+                            <tr>
+                              <td width="44" align="center" valign="top" style="width:44px;vertical-align:top;">
+                                <div style="width:38px;height:38px;border-radius:19px;box-sizing:border-box;{circle_style}text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">{index}</div>
+                                {connector}
+                              </td>
+                              <td valign="top" style="vertical-align:top;padding:{text_padding};">
+                                <div style="font-size:15px;line-height:20px;color:#2f322c;font-weight:700;">{escape(title)}</div>
+                                <div class="tv-step-sub" style="margin-top:5px;font-size:13px;line-height:19px;color:#8b918a;">{escape(description)}</div>
+                              </td>
+                            </tr>"""
+        )
+
+    return f"""
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:18px;">
+{''.join(rows)}
+                          </table>"""
+
+
+def _confirmation_shipping_label_html(order: OrderOut) -> str:
+    if order.shipping_option.strip().lower() == "store-dropoff":
+        label_prefix, separator, selected_store = order.shipping_label.partition(":")
+        if separator and selected_store.strip():
+            return (
+                f"{escape(label_prefix)}:<br>"
+                f'<span style="display:inline-block;margin-top:3px;">{escape(selected_store.strip())}</span>'
+            )
+    return escape(order.shipping_label)
+
+
 def _confirmation_html(order: OrderOut) -> str:
     price = f"{order.price_sek:,}".replace(",", " ")
     customer_name = escape(order.customer.first_name)
@@ -675,10 +760,11 @@ def _confirmation_html(order: OrderOut) -> str:
     model = escape(order.model)
     storage = escape(order.storage)
     dealer_name = escape(order.dealer_name)
-    shipping_label = escape(order.shipping_label)
+    shipping_label = _confirmation_shipping_label_html(order)
     payment_label = escape(order.payment.label)
     phone_model = f"{model} {storage}"
     logo_url = f"{settings.public_base_url.rstrip('/')}/mail-assets/televera-logo-full.png"
+    timeline_markup = _confirmation_timeline_markup(_confirmation_steps(order))
 
     return f"""
     <!doctype html>
@@ -770,41 +856,30 @@ def _confirmation_html(order: OrderOut) -> str:
                 </tr>
 
                 <tr>
+                  <td class="tv-px" style="padding:16px 30px 4px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fff8e6;border:1px solid #f0d58c;border-radius:14px;">
+                      <tr>
+                        <td style="padding:18px 18px 19px;">
+                          <div style="font-size:17px;line-height:22px;color:#2f322c;font-weight:700;">Viktigt innan du skickar eller lämnar in mobilen</div>
+                          <div style="margin-top:10px;font-size:14px;line-height:21px;color:#64685f;">
+                            Säkerhetskopiera det du vill behålla. <strong style="color:#2f322c;">Stäng av Hitta min iPhone</strong>, logga ut från Apple-ID och fabriksåterställ mobilen. Ta även ur eventuellt fysiskt SIM-kort.
+                          </div>
+                          <div style="margin-top:9px;font-size:13px;line-height:20px;color:#8a6420;font-weight:600;">
+                            Hitta min iPhone måste vara avstängt när köparen tar emot mobilen.
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
                   <td class="tv-px" style="padding:16px 30px 30px;">
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f1f3f2;border:1px solid #d9dedb;border-radius:14px;">
                       <tr>
                         <td style="padding:18px 18px 22px;">
                           <div style="font-size:17px;line-height:22px;color:#2f322c;font-weight:700;">Vad händer nu?</div>
-
-                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:18px;">
-                            <tr>
-                              <td width="46" style="padding:0 14px 14px 0;vertical-align:top;">
-                                <div style="width:34px;height:34px;border-radius:17px;background:#15bd80;color:#ffffff;text-align:center;line-height:34px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">1</div>
-                              </td>
-                              <td style="padding:0 0 14px;vertical-align:top;border-bottom:1px solid #d9dedb;">
-                                <div style="font-size:15px;line-height:20px;color:#2f322c;font-weight:700;">Skicka in</div>
-                                <div style="margin-top:3px;font-size:13px;line-height:19px;color:#8b918a;">Du får fraktsedeln och postar mobilen.</div>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td width="46" style="padding:14px 14px 14px 0;vertical-align:top;">
-                                <div style="width:30px;height:30px;border-radius:15px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:26px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">2</div>
-                              </td>
-                              <td style="padding:14px 0;vertical-align:top;border-bottom:1px solid #d9dedb;">
-                                <div style="font-size:15px;line-height:20px;color:#2f322c;font-weight:700;">Kontroll</div>
-                                <div style="margin-top:3px;font-size:13px;line-height:19px;color:#8b918a;">{dealer_name} testar mobilen vid ankomst.</div>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td width="46" style="padding:14px 14px 0 0;vertical-align:top;">
-                                <div style="width:30px;height:30px;border-radius:15px;background:#ffffff;border:2px solid #c0e6d2;color:#15bd80;text-align:center;line-height:26px;font-size:14px;font-weight:700;mso-line-height-rule:exactly;">3</div>
-                              </td>
-                              <td style="padding:14px 0 0;vertical-align:top;">
-                                <div style="font-size:15px;line-height:20px;color:#2f322c;font-weight:700;">Pengar</div>
-                                <div style="margin-top:3px;font-size:13px;line-height:19px;color:#8b918a;">Utbetalning via {payment_label} direkt efter OK.</div>
-                              </td>
-                            </tr>
-                          </table>
+{timeline_markup}
                         </td>
                       </tr>
                     </table>
@@ -831,6 +906,11 @@ def _confirmation_html(order: OrderOut) -> str:
 
 def _confirmation_text(order: OrderOut) -> str:
     price = f"{order.price_sek:,}".replace(",", " ")
+    steps = _confirmation_steps(order)
+    step_text = "\n".join(
+        f"{index}. {title}: {description}"
+        for index, (title, description) in enumerate(steps, start=1)
+    )
     return f"""Hej {order.customer.first_name},
 
 Tack för din order hos Televera.
@@ -842,8 +922,12 @@ Uppskattat pris: {price} kr
 Frakt: {order.shipping_label}
 Betalning: {order.payment.label}
 
+Viktigt innan du skickar eller lämnar in mobilen
+Säkerhetskopiera det du vill behålla. Stäng av Hitta min iPhone, logga ut från Apple-ID och fabriksåterställ mobilen. Ta även ur eventuellt fysiskt SIM-kort.
+Hitta min iPhone måste vara avstängt när köparen tar emot mobilen.
+
 Vad händer nu?
-Du får fraktinstruktioner och skickar mobilen när du är redo. {order.dealer_name} kontrollerar mobilen och betalar ut enligt valt betalningssätt.
+{step_text}
 
 Hälsningar,
 Televera
