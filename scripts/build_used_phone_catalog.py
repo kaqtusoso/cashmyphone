@@ -62,9 +62,116 @@ KNOWN_MODEL_DISPLAY_BY_KEY.update(
         "iphone air": "iPhone Air",
         "iphone 16e": "iPhone 16e",
         "iphone 17e": "iPhone 17e",
+        "iphone 13 mini": "iPhone 13 Mini",
+        "iphone 12 mini": "iPhone 12 Mini",
+        "iphone xs max": "iPhone XS Max",
+        "iphone xs": "iPhone XS",
+        "iphone xr": "iPhone XR",
     }
 )
 KNOWN_MODEL_KEYS_BY_LENGTH = sorted(KNOWN_MODEL_DISPLAY_BY_KEY, key=len, reverse=True)
+
+# Keep buy-side retailer colors aligned with the model-specific color catalog
+# used by the sell flow. Retailers often use generic names such as "White"
+# even when Apple only sold that model as Silver.
+MODEL_COLOR_KEYS = {
+    "iPhone 17e": ("black", "white", "soft_pink"),
+    "iPhone Air": ("space_black", "cloud_white", "light_gold", "sky_blue"),
+    "iPhone 17 Pro Max": ("deep_blue", "cosmic_orange", "silver"),
+    "iPhone 17 Pro": ("deep_blue", "cosmic_orange", "silver"),
+    "iPhone 17": ("black", "white", "mist_blue", "sage", "lavender"),
+    "iPhone 16e": ("black", "white"),
+    "iPhone 16 Pro Max": ("black_titanium", "white_titanium", "natural_titanium", "desert_titanium"),
+    "iPhone 16 Pro": ("black_titanium", "white_titanium", "natural_titanium", "desert_titanium"),
+    "iPhone 16 Plus": ("black", "white", "pink", "teal", "ultramarine"),
+    "iPhone 16": ("black", "white", "pink", "teal", "ultramarine"),
+    "iPhone 15 Pro Max": ("black_titanium", "white_titanium", "blue_titanium", "natural_titanium"),
+    "iPhone 15 Pro": ("black_titanium", "white_titanium", "blue_titanium", "natural_titanium"),
+    "iPhone 15 Plus": ("black", "blue", "green", "yellow", "pink"),
+    "iPhone 15": ("black", "blue", "green", "yellow", "pink"),
+    "iPhone 14 Pro Max": ("space_black", "silver", "gold", "deep_purple"),
+    "iPhone 14 Pro": ("space_black", "silver", "gold", "deep_purple"),
+    "iPhone 14 Plus": ("midnight", "starlight", "blue", "purple", "red", "yellow"),
+    "iPhone 14": ("midnight", "starlight", "blue", "purple", "red", "yellow"),
+    "iPhone 13 Pro Max": ("sierra_blue", "silver", "gold", "graphite", "alpine_green"),
+    "iPhone 13 Pro": ("sierra_blue", "silver", "gold", "graphite", "alpine_green"),
+    "iPhone 13 Mini": ("green", "pink", "blue", "midnight", "starlight", "red"),
+    "iPhone 13": ("green", "pink", "blue", "midnight", "starlight", "red"),
+    "iPhone 12 Pro Max": ("silver", "graphite", "gold", "pacific_blue"),
+    "iPhone 12 Pro": ("silver", "graphite", "gold", "pacific_blue"),
+    "iPhone 12 Mini": ("black", "white", "red", "green", "blue", "purple"),
+    "iPhone 12": ("black", "white", "red", "green", "blue", "purple"),
+    "iPhone 11 Pro Max": ("midnight_green", "space_grey", "silver", "gold"),
+    "iPhone 11 Pro": ("midnight_green", "space_grey", "silver", "gold"),
+    "iPhone 11": ("purple", "yellow", "green", "black", "white", "red"),
+    "iPhone SE 2022": ("midnight", "starlight", "red"),
+    "iPhone SE 2020": ("black", "white", "red"),
+    "iPhone XS Max": ("gold", "space_grey", "silver"),
+    "iPhone XS": ("gold", "space_grey", "silver"),
+    "iPhone XR": ("black", "white", "blue", "yellow", "coral", "red"),
+    "iPhone X": ("silver", "space_grey"),
+    "iPhone 8 Plus": ("gold", "silver", "space_grey", "red"),
+    "iPhone 8": ("gold", "silver", "space_grey", "red"),
+    "iPhone 7 Plus": ("black", "gold", "jet_black", "red", "silver", "rose_gold"),
+    "iPhone 7": ("black", "gold", "jet_black", "red", "silver", "rose_gold"),
+}
+
+COLOR_LABEL_BY_KEY = {
+    "alpine_green": "Alpingrön", "black": "Svart", "black_titanium": "Svart titan",
+    "blue": "Blå", "blue_titanium": "Blått titan", "cloud_white": "Molnvit",
+    "coral": "Korall", "cosmic_orange": "Kosmisk orange", "deep_blue": "Djupblå",
+    "deep_purple": "Djuplila", "desert_titanium": "Ökentitan", "gold": "Guld",
+    "graphite": "Grafit", "green": "Grön", "jet_black": "Jetsvart", "lavender": "Lavendel",
+    "light_gold": "Ljust guld", "midnight": "Midnatt", "midnight_green": "Midnattsgrön",
+    "mist_blue": "Dimblå", "natural_titanium": "Naturligt titan", "pacific_blue": "Havsblå",
+    "pink": "Rosa", "purple": "Lila", "red": "Röd", "rose_gold": "Roséguld",
+    "sage": "Salvia", "sierra_blue": "Sierrablå", "silver": "Silver", "sky_blue": "Himmelsblå",
+    "soft_pink": "Ljusrosa", "space_black": "Rymdsvart", "space_grey": "Rymdgrå",
+    "starlight": "Stjärnglans", "teal": "Mörkturkos", "ultramarine": "Ultramarin",
+    "white": "Vit", "white_titanium": "Vitt titan", "yellow": "Gul",
+}
+
+COLOR_KEY_ALIASES = {
+    "black": "black", "svart": "black", "white": "white", "vit": "white",
+    "silver": "silver", "silverfargad": "silver", "blue": "blue", "bla": "blue", "blue 2": "blue",
+    "green": "green", "gron": "green", "pink": "pink", "rosa": "pink",
+    "purple": "purple", "lila": "purple", "yellow": "yellow", "gul": "yellow",
+    "red": "red", "rod": "red", "product red": "red", "gold": "gold", "guld": "gold",
+    "graphite": "graphite", "grafit": "graphite", "grey": "space_grey", "gray": "space_grey", "gra": "space_grey",
+    "space grey": "space_grey", "space gray": "space_grey", "rymdgra": "space_grey",
+    "space black": "space_black", "rymdsvart": "space_black", "midnight": "midnight", "midnatt": "midnight",
+    "starlight": "starlight", "stjarnglans": "starlight", "coral": "coral", "korall": "coral",
+    "jet black": "jet_black", "jetsvart": "jet_black", "rose gold": "rose_gold", "roseguld": "rose_gold",
+    "lavender": "lavender", "lavendel": "lavender", "sage": "sage", "salvia": "sage",
+    "teal": "teal", "morkturkos": "teal", "ultramarine": "ultramarine", "ultramarin": "ultramarine",
+    "sierra blue": "sierra_blue", "sierrabla": "sierra_blue", "pacific blue": "pacific_blue",
+    "stillahavsbla": "pacific_blue", "havsbla": "pacific_blue", "alpine green": "alpine_green",
+    "alpingron": "alpine_green", "midnight green": "midnight_green", "midnattsgron": "midnight_green",
+    "mork gron": "midnight_green",
+    "deep purple": "deep_purple", "djupbla": "deep_blue", "deep blue": "deep_blue",
+    "cosmic orange": "cosmic_orange", "kosmisk orange": "cosmic_orange", "kosmiskt orange": "cosmic_orange",
+    "mist blue": "mist_blue", "dimbla": "mist_blue", "disbla": "mist_blue", "sky blue": "sky_blue",
+    "himmelsbla": "sky_blue", "soft pink": "soft_pink", "ljusrosa": "soft_pink",
+    "cloud white": "cloud_white", "molnvit": "cloud_white", "light gold": "light_gold",
+    "ljust guld": "light_gold", "black titanium": "black_titanium", "svart titanium": "black_titanium",
+    "svart titan": "black_titanium", "white titanium": "white_titanium", "vit titanium": "white_titanium",
+    "vit titan": "white_titanium", "vitt titan": "white_titanium", "blue titanium": "blue_titanium",
+    "bla titanium": "blue_titanium", "blatt titan": "blue_titanium",
+    "natural titanium": "natural_titanium", "natural titan": "natural_titanium", "titanium": "natural_titanium",
+    "naturlig titanium": "natural_titanium", "naturlig titan": "natural_titanium", "naturligt titan": "natural_titanium",
+    "desert titanium": "desert_titanium", "sandfargad titanium": "desert_titanium",
+    "sandfargat titan": "desert_titanium", "okentitan": "desert_titanium", "orange": "cosmic_orange",
+}
+
+COLOR_FAMILIES = {
+    "black": {"black", "space_black", "midnight", "jet_black", "black_titanium", "graphite", "space_grey"},
+    "white": {"white", "cloud_white", "starlight", "silver", "white_titanium"},
+    "blue": {"blue", "blue_titanium", "deep_blue", "mist_blue", "sky_blue", "sierra_blue", "pacific_blue", "ultramarine"},
+    "green": {"green", "sage", "alpine_green", "midnight_green", "teal"},
+    "purple": {"purple", "deep_purple", "lavender"},
+    "pink": {"pink", "soft_pink", "rose_gold"},
+    "gold": {"gold", "light_gold", "desert_titanium", "natural_titanium"},
+}
 
 
 def _clean_text(value: Any) -> str | None:
@@ -114,8 +221,6 @@ def normalize_model(raw_model: Any) -> str | None:
         if re.search(rf"(^|\s){re.escape(known_key)}($|\s)", model_key):
             return KNOWN_MODEL_DISPLAY_BY_KEY[known_key]
 
-    if model_key.startswith("iphone"):
-        return " ".join("iPhone" if part == "iphone" else part.upper() if part == "se" else part.capitalize() for part in model_key.split())
     return None
 
 
@@ -136,7 +241,7 @@ def normalize_condition_tier(raw_condition: Any) -> str:
     return "unknown"
 
 
-def normalize_color(raw_color: Any) -> str | None:
+def _color_key(raw_color: Any) -> str | None:
     color = _clean_text(raw_color)
     if not color:
         return None
@@ -145,24 +250,29 @@ def normalize_color(raw_color: Any) -> str | None:
     color = color.strip(" ,|")
     if not color:
         return None
-    replacements = {
-        "black": "Svart",
-        "white": "Vit",
-        "red": "Röd",
-        "yellow": "Gul",
-        "green": "Grön",
-        "blue": "Blå",
-        "purple": "Lila",
-        "silver": "Silver",
-        "gold": "Guld",
-        "space grey": "Rymdgrå",
-        "space gray": "Rymdgrå",
-        "midnight": "Midnatt",
-        "starlight": "Stjärnglans",
-        "grafit": "Grafit",
-        "graphite": "Grafit",
-    }
-    return replacements.get(color.lower(), color[:1].upper() + color[1:])
+    normalized = color.lower()
+    normalized = normalized.replace("å", "a").replace("ä", "a").replace("ö", "o").replace("é", "e")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+    if "natural" in normalized or "naturlig" in normalized or "naturligt" in normalized:
+        return "natural_titanium"
+    return COLOR_KEY_ALIASES.get(normalized)
+
+
+def normalize_color(raw_color: Any, model: str | None = None) -> str | None:
+    key = _color_key(raw_color)
+    if not key:
+        return None if model in MODEL_COLOR_KEYS else _clean_text(raw_color)
+
+    allowed = MODEL_COLOR_KEYS.get(model or "")
+    if allowed and key not in allowed:
+        family = next((members for members in COLOR_FAMILIES.values() if key in members), None)
+        family_matches = [candidate for candidate in allowed if family and candidate in family]
+        if len(family_matches) == 1:
+            key = family_matches[0]
+
+    if allowed and key not in allowed:
+        return None
+    return COLOR_LABEL_BY_KEY.get(key)
 
 
 def extract_battery_health(*values: Any) -> str | None:
@@ -211,7 +321,7 @@ def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | 
         "model_slug": slugify(model),
         "storage_gb": storage_gb,
         "storage": storage_label(storage_gb) or _clean_text(row.get("storage")),
-        "color": normalize_color(row.get("color")),
+        "color": normalize_color(row.get("color"), model),
         "condition_raw": condition_raw,
         "condition_tier": condition_tier,
         "condition_label": condition_mapping.condition_label,
