@@ -22,21 +22,29 @@ INDEX_HTML = DIST_DIR / "index.html"
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 
 
+async def initialize_price_history() -> None:
+    """Initiera historiken efter att API:t har börjat svara på healthchecks."""
+    try:
+        async with AsyncSessionLocal() as db:
+            snapshots = await bootstrap_all_current_prices(db)
+            await db.commit()
+        if snapshots:
+            logger.info(
+                "📚 Prishistorik initierad: %s snapshots, %s prisrader",
+                len(snapshots),
+                sum(snapshot.rows for snapshot in snapshots),
+            )
+    except Exception:
+        logger.exception("Prishistoriken kunde inte initieras")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Televera API startar...")
     await init_db()
-    async with AsyncSessionLocal() as db:
-        snapshots = await bootstrap_all_current_prices(db)
-        await db.commit()
-    if snapshots:
-        logger.info(
-            "📚 Prishistorik initierad: %s snapshots, %s prisrader",
-            len(snapshots),
-            sum(snapshot.rows for snapshot in snapshots),
-        )
     setup_scheduler()
+    asyncio.create_task(initialize_price_history())
     asyncio.create_task(scrape_if_prices_empty())
     yield
     # Shutdown
