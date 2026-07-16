@@ -21,6 +21,8 @@ FastAPI-backend som hämtar inköpspriser för begagnade iPhones från svenska �
 |---|---|
 | `GET /api/prices` | Alla priser (filtrera med `?model=`, `?storage_gb=`, `?condition=`, `?retailer=`) |
 | `GET /api/prices/best` | Bästa bud per modell/lagring/skick |
+| `GET /api/prices/history/snapshots` | Intern lista över historiska prisinläsningar (kräver `X-API-Key`) |
+| `GET /api/prices/history` | Intern prisperiodhistorik per modell/återförsäljare (kräver `X-API-Key`) |
 | `GET /api/models` | Lista alla tillgängliga modeller |
 | `GET /api/retailers` | Lista aktiva återförsäljare |
 | `GET /api/used-phones` | Filtrerad köp-katalog för begagnade iPhones |
@@ -86,10 +88,13 @@ PLAYWRIGHT_HEADLESS=true
 ALLOWED_ORIGINS=https://televera.se
 ```
 
-Railway Postgres behövs inte för nuvarande prisdataflöde. API:t läser bara den
-senaste aktiva prislistan, och varje lyckad scraping ersätter återförsäljarens
-gamla prisrader. Det gör en liten SQLite-databas på persistent volume till ett
-billigare alternativ än en 24/7 Postgres-container.
+Railway Postgres behövs inte för nuvarande prisdataflöde. API:t läser den
+senaste aktiva prislistan från `buyback_prices`. Varje lyckad inläsning loggas
+dessutom i `price_snapshots`, medan `buyback_price_history` bara får en ny
+prisperiod när ett pris tillkommer, ändras eller försvinner. Det ger en komplett
+historik utan att duplicera cirka 80 000 oförändrade prisrader vid varje körning.
+Vid första serverstart efter uppgraderingen arkiveras den befintliga live-listan
+automatiskt som historikens startpunkt.
 
 Köp-katalogen för `/kop-begagnad-iphone` uppdateras separat från säljpriserna.
 Railway kör storefront-scrapers enligt `USED_PHONE_CATALOG_CRON_HOURS`, skriver
@@ -183,6 +188,8 @@ FixPhonePro använder kompakta formelnycklar från deras publika JS:
 ## Databasschema
 
 - `buyback_prices` – aktuella inköpspriser per återförsäljare/modell/lagring/skick
+- `price_snapshots` – en rad per lyckad komplett prisinläsning
+- `buyback_price_history` – historiska prisperioder med `valid_from`/`valid_to`
 - `scraper_runs` – logg över scraping-körningar med status och tidsstämplar
 
 ## Anteckningar
@@ -191,7 +198,7 @@ FixPhonePro använder kompakta formelnycklar från deras publika JS:
 - Nya värderingar via `/api/quote` triggar inte scraping, utan läser bara senast sparade priser från databasen.
 - Manuell scraping körs bara via `POST /api/scrape`, till exempel när en ny återförsäljare har lagts till eller priser behöver uppdateras direkt.
 - Swappie och FixMyPhone kräver Playwright (ingår i Dockerfile)
-- Priser märks som `is_active=false` innan varje ny scraping-körning
+- Aktuella priser ersätts atomärt först efter att den kompletta inläsningen har arkiverats
 - PhoneHero-priser beräknas från publika Livewire-snapshots: baspris per lagring minus avdrag per formulärsvar.
 - reNewed-priser hämtas från samma Reusely-widget-API som deras säljsida använder.
 

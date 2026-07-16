@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .database import init_db
+from .database import AsyncSessionLocal, init_db
+from .pricing.history import bootstrap_all_current_prices
 from .scheduler import setup_scheduler, scheduler, scrape_if_prices_empty
 from .routers import orders, prices, used_phones
 from .config import settings
@@ -26,6 +27,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Televera API startar...")
     await init_db()
+    async with AsyncSessionLocal() as db:
+        snapshots = await bootstrap_all_current_prices(db)
+        await db.commit()
+    if snapshots:
+        logger.info(
+            "📚 Prishistorik initierad: %s snapshots, %s prisrader",
+            len(snapshots),
+            sum(snapshot.rows for snapshot in snapshots),
+        )
     setup_scheduler()
     asyncio.create_task(scrape_if_prices_empty())
     yield

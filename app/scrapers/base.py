@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete
-from ..models import BuybackPrice, ScraperRun, ScrapeStatusOut
+from ..models import ScraperRun, ScrapeStatusOut
+from ..pricing.history import replace_current_buyback_prices
 
 logger = logging.getLogger(__name__)
 
@@ -47,33 +47,28 @@ class BaseScraper(ABC):
                 return ScrapeStatusOut(retailer=self.retailer_id, status="error",
                                        message="Inga priser hittades")
 
-            # Ersätt återförsäljarens gamla prislista. Vi behöver bara senaste
-            # aktiva priserna i API:t; historik gör databasen onödigt stor.
-            await db.execute(
-                delete(BuybackPrice)
-                .where(BuybackPrice.retailer == self.retailer_id)
+            captured_at = datetime.utcnow()
+            snapshot = await replace_current_buyback_prices(
+                db,
+                retailer=self.retailer_id,
+                prices=prices,
+                captured_at=captured_at,
+                source="scraper",
             )
-
-            # Lägg till nya priser
-            for p in prices:
-                db.add(BuybackPrice(
-                    retailer=self.retailer_id,
-                    model=p["model"],
-                    storage_gb=p.get("storage_gb"),
-                    condition=p.get("condition"),
-                    price_sek=p["price_sek"],
-                    currency="SEK",
-                    url=p.get("url"),
-                    scraped_at=datetime.utcnow(),
-                    is_active=True,
-                ))
 
             run.status = "success"
             run.prices_found = len(prices)
             run.finished_at = datetime.utcnow()
             await db.commit()
 
-            logger.info(f"✅ {self.retailer_name}: {len(prices)} priser sparade")
+            logger.info(
+                "✅ %s: %s priser sparade (historik +%s, ändrade %s, borttagna %s)",
+                self.retailer_name,
+                len(prices),
+                snapshot.added,
+                snapshot.changed,
+                snapshot.removed,
+            )
             return ScrapeStatusOut(retailer=self.retailer_id, status="success",
                                    message=f"{len(prices)} priser hämtade", prices_found=len(prices))
 

@@ -5,8 +5,16 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 from ..database import get_db
-from ..models import BuybackPrice, PriceOut, BestOffer, ScrapeStatusOut
+from ..models import (
+    BuybackPrice,
+    BuybackPriceHistory,
+    PriceSnapshot,
+    PriceOut,
+    BestOffer,
+    ScrapeStatusOut,
+)
 from ..pricing.crosswalk import FormAnswers, all_conditions, phonehero_conditions
+from ..pricing.history import replace_current_buyback_prices
 from ..config import settings
 
 router = APIRouter(prefix="/api", tags=["prices"])
@@ -281,6 +289,109 @@ class ImportPrice(BaseModel):
     url: Optional[str] = None
 
 
+class PriceSnapshotOut(BaseModel):
+    id: int
+    market_side: str
+    source: str
+    retailer: str
+    captured_at: datetime
+    row_count: int
+    added_count: int
+    changed_count: int
+    removed_count: int
+    unchanged_count: int
+
+
+class PriceHistoryOut(BaseModel):
+    retailer: str
+    model: str
+    storage_gb: Optional[int]
+    condition: Optional[str]
+    price_sek: int
+    currency: str
+    valid_from: datetime
+    valid_to: Optional[datetime]
+
+
+def _require_scrape_api_key(x_api_key: str) -> None:
+    if x_api_key != settings.scrape_api_key:
+        raise HTTPException(status_code=401, detail="Ogiltig API-nyckel")
+
+
+@router.get(
+    "/prices/history/snapshots",
+    response_model=List[PriceSnapshotOut],
+    summary="Lista historiska pris-snapshots",
+)
+async def get_price_history_snapshots(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    retailer: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    _require_scrape_api_key(x_api_key)
+    filters = [PriceSnapshot.market_side == "sell"]
+    if retailer:
+        filters.append(func.lower(PriceSnapshot.retailer) == retailer.lower())
+    result = await db.execute(
+        select(PriceSnapshot)
+        .where(*filters)
+        .order_by(PriceSnapshot.captured_at.desc(), PriceSnapshot.id.desc())
+        .limit(limit)
+    )
+    return [
+        PriceSnapshotOut.model_validate(row, from_attributes=True)
+        for row in result.scalars().all()
+    ]
+
+
+@router.get(
+    "/prices/history",
+    response_model=List[PriceHistoryOut],
+    summary="Hämta historiska prisperioder",
+)
+async def get_price_history(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    retailer: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    storage_gb: Optional[int] = Query(None),
+    condition: Optional[str] = Query(None),
+    active_only: bool = Query(False),
+    limit: int = Query(500, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+):
+    _require_scrape_api_key(x_api_key)
+    if not retailer and not model:
+        raise HTTPException(status_code=400, detail="Ange retailer eller model för historikfrågan")
+
+    filters = []
+    if retailer:
+        filters.append(func.lower(BuybackPriceHistory.retailer) == retailer.lower())
+    if model:
+        filters.append(func.lower(BuybackPriceHistory.model) == _normalize_iphone_model(model).lower())
+    if storage_gb is not None:
+        filters.append(BuybackPriceHistory.storage_gb == storage_gb)
+    if condition:
+        filters.append(func.lower(BuybackPriceHistory.condition) == condition.lower())
+    if active_only:
+        filters.append(BuybackPriceHistory.valid_to.is_(None))
+
+    result = await db.execute(
+        select(BuybackPriceHistory)
+        .where(*filters)
+        .order_by(
+            BuybackPriceHistory.valid_from.desc(),
+            BuybackPriceHistory.retailer,
+            BuybackPriceHistory.model,
+        )
+        .limit(limit)
+    )
+    return [
+        PriceHistoryOut.model_validate(row, from_attributes=True)
+        for row in result.scalars().all()
+    ]
+
+
 @router.post("/import-prices/{retailer}", summary="Importera förhandshämtade priser (för lokala scrapers)")
 async def import_prices(
     retailer: str,
@@ -290,35 +401,35 @@ async def import_prices(
 ):
     """
     Tar emot en lista priser från en lokal scraper och sparar dem i DB.
-    Markerar alla befintliga priser för återförsäljaren som inaktiva först.
+    Arkiverar observationen och ersätter sedan återförsäljarens aktuella prislista.
     Skyddat av API-nyckel.
     """
-    if x_api_key != settings.scrape_api_key:
-        raise HTTPException(status_code=401, detail="Ogiltig API-nyckel")
+    _require_scrape_api_key(x_api_key)
+    if not prices:
+        raise HTTPException(status_code=400, detail="Inga giltiga priser att importera")
 
-    from sqlalchemy import delete
-    # Ersätt återförsäljarens gamla prislista. API:t läser bara senaste priser.
-    await db.execute(
-        delete(BuybackPrice)
-        .where(func.lower(BuybackPrice.retailer) == retailer.lower())
+    now = datetime.utcnow()
+    snapshot = await replace_current_buyback_prices(
+        db,
+        retailer=retailer,
+        prices=(p.model_dump() for p in prices),
+        captured_at=now,
+        source="import",
     )
 
-    # Infoga nya priser
-    now = datetime.utcnow()
-    for p in prices:
-        db.add(BuybackPrice(
-            retailer=retailer.lower(),
-            model=p.model,
-            storage_gb=p.storage_gb,
-            condition=p.condition,
-            price_sek=p.price_sek,
-            url=p.url,
-            scraped_at=now,
-            is_active=True,
-        ))
-
     await db.commit()
-    return {"retailer": retailer, "imported": len(prices), "status": "ok"}
+    return {
+        "retailer": retailer,
+        "imported": len(prices),
+        "status": "ok",
+        "snapshot_id": snapshot.snapshot_id,
+        "history": {
+            "added": snapshot.added,
+            "changed": snapshot.changed,
+            "removed": snapshot.removed,
+            "unchanged": snapshot.unchanged,
+        },
+    }
 
 
 @router.post("/scrape", summary="Trigga manuell scraping (körs i bakgrunden)")
