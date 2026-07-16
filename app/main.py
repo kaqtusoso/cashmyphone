@@ -24,18 +24,28 @@ PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 
 async def initialize_price_history() -> None:
     """Initiera historiken efter att API:t har börjat svara på healthchecks."""
-    try:
-        async with AsyncSessionLocal() as db:
-            snapshots = await bootstrap_all_current_prices(db)
-            await db.commit()
-        if snapshots:
-            logger.info(
-                "📚 Prishistorik initierad: %s snapshots, %s prisrader",
-                len(snapshots),
-                sum(snapshot.rows for snapshot in snapshots),
+    for attempt in range(1, 4):
+        await asyncio.sleep(2 if attempt == 1 else 10 * attempt)
+        try:
+            async with AsyncSessionLocal() as db:
+                snapshots = await bootstrap_all_current_prices(db, commit_each=True)
+                await db.commit()
+            if snapshots:
+                logger.info(
+                    "📚 Prishistorik initierad: %s snapshots, %s prisrader",
+                    len(snapshots),
+                    sum(snapshot.rows for snapshot in snapshots),
+                )
+            return
+        except Exception:
+            if attempt == 3:
+                logger.exception("Prishistoriken kunde inte initieras efter tre försök")
+                return
+            logger.warning(
+                "Prishistoriken kunde inte initieras (försök %s/3); försöker igen",
+                attempt,
+                exc_info=True,
             )
-    except Exception:
-        logger.exception("Prishistoriken kunde inte initieras")
 
 
 @asynccontextmanager

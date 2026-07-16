@@ -288,19 +288,25 @@ async def replace_current_buyback_prices(
     return stats
 
 
-async def bootstrap_all_current_prices(db: AsyncSession) -> list[SnapshotStats]:
+async def bootstrap_all_current_prices(
+    db: AsyncSession,
+    *,
+    commit_each: bool = False,
+) -> list[SnapshotStats]:
     """Skapa startpunkter för alla prislistor i en befintlig latest-only-databas."""
-    retailers = (
+    retailer_rows = (
         await db.execute(
-            select(BuybackPrice.retailer)
+            select(BuybackPrice.retailer, func.count(BuybackPrice.id))
             .where(BuybackPrice.is_active.is_(True))
-            .distinct()
-            .order_by(BuybackPrice.retailer)
+            .group_by(BuybackPrice.retailer)
+            .order_by(func.count(BuybackPrice.id), BuybackPrice.retailer)
         )
-    ).scalars().all()
+    ).all()
     results: list[SnapshotStats] = []
-    for retailer in retailers:
+    for retailer, _row_count in retailer_rows:
         stats = await ensure_retailer_history_seeded(db, retailer)
         if stats:
             results.append(stats)
+            if commit_each:
+                await db.commit()
     return results

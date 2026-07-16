@@ -15,7 +15,7 @@ from app.pricing.history import bootstrap_all_current_prices
 async def main() -> None:
     await init_db()
     async with AsyncSessionLocal() as db:
-        snapshots = await bootstrap_all_current_prices(db)
+        snapshots = await bootstrap_all_current_prices(db, commit_each=True)
         await db.commit()
 
     if not snapshots:
