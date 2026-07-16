@@ -21,7 +21,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from bs4 import BeautifulSoup
 from curl_cffi.requests import AsyncSession
@@ -77,6 +77,33 @@ def _split_options(option_labels: list[str]) -> tuple[str | None, str | None, st
     return storage, condition, color
 
 
+def _variant_url(
+    data: dict[str, Any],
+    combination: dict[str, Any],
+    page_url: str,
+) -> str:
+    titles = {int(key): value for key, value in data.get("optionsTitles", {}).items()}
+    option_ids = combination.get("optionIDs") or []
+    labels = [titles[option_id] for option_id in option_ids if option_id in titles]
+    storage, condition, color = _split_options(labels)
+    condition_id = next(
+        (option_id for option_id in option_ids if titles.get(option_id) == condition),
+        None,
+    )
+    product_path = str(data.get("productURL") or "").strip("/")
+    combination_id = combination.get("id")
+    if not all((product_path, storage, color, condition_id, combination_id)):
+        return page_url
+
+    suffix = "--{}-{}-{}-{}".format(
+        storage.lower().replace(" ", ""),
+        color.lower().replace(" ", "-"),
+        condition_id,
+        combination_id,
+    )
+    return f"{BASE_URL}/{quote(product_path + suffix, safe='/-')}"
+
+
 def parse_product_page(html: str, page_url: str) -> list[dict[str, Any]]:
     data = _extract_product_data(html)
     if not data:
@@ -113,7 +140,10 @@ def parse_product_page(html: str, page_url: str) -> list[dict[str, Any]]:
                 "reference_price_sek": int(normal_price) if normal_price else None,
                 "currency": "SEK",
                 "stock": stock,
-                "url": page_url,
+                "url": _variant_url(data, combination, page_url),
+                "variant_deep_link": _variant_url(data, combination, page_url) != page_url,
+                "variant_selection_required": False,
+                "variant_url_kind": "telestore_combination",
             }
         )
     return rows
@@ -181,6 +211,9 @@ def write_outputs(rows: list[dict[str, Any]]) -> None:
         "currency",
         "stock",
         "url",
+        "variant_deep_link",
+        "variant_selection_required",
+        "variant_url_kind",
         "scraped_at",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as f:

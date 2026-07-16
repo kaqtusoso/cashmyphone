@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from bs4 import BeautifulSoup
 from curl_cffi.requests import AsyncSession
@@ -76,6 +76,12 @@ def _parse_model_from_name(name: str | None, storage: str | None, condition: str
             model = model.replace(value, "")
     model = re.sub(r"\s+", " ", model).strip()
     return model or None
+
+
+def _product_url(page_url: str, sku: Any) -> str:
+    """Build PhoneHero's variant-specific URL instead of its model fallback."""
+    model_url = re.sub(r"/\d+/?$", "", page_url.rstrip("/"))
+    return f"{model_url}/{quote(str(sku), safe='')}"
 
 
 def parse_model_links(html: str) -> list[str]:
@@ -132,7 +138,10 @@ def parse_product_page(html: str, page_url: str) -> list[dict[str, Any]]:
                     "reference_price_sek": int(price + discount) if price is not None and discount else None,
                     "currency": "SEK",
                     "stock": 1,
-                    "url": page_url,
+                    "url": _product_url(page_url, sku),
+                    "variant_deep_link": bool(sku),
+                    "variant_selection_required": False,
+                    "variant_url_kind": "sku_path",
                     "image_url": product.get("image"),
                 }
             )
@@ -189,6 +198,9 @@ def write_outputs(rows: list[dict[str, Any]]) -> None:
         "currency",
         "stock",
         "url",
+        "variant_deep_link",
+        "variant_selection_required",
+        "variant_url_kind",
         "image_url",
         "scraped_at",
     ]

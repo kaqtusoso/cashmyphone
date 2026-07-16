@@ -10,8 +10,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,19 +45,46 @@ STOREFRONT_SCRAPERS = {
 }
 
 
+def snapshot_failure_marker(retailer: str) -> Path:
+    return DEFAULT_INPUT_DIR / f"{retailer}_storefront_latest.failed.json"
+
+
+def mark_storefront_refresh_failed(retailer: str, exc: Exception) -> None:
+    marker = snapshot_failure_marker(retailer)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "retailer": retailer,
+        "failed_at": datetime.now(timezone.utc).isoformat(),
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+    }
+    temporary = marker.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    temporary.replace(marker)
+
+
 async def refresh_storefront_snapshot(retailer: str) -> dict[str, Any]:
     module_path = STOREFRONT_SCRAPERS[retailer]
     module = importlib.import_module(module_path)
 
     LOGGER.info("Refreshing %s storefront snapshot", retailer)
     rows = await module.scrape()
+    if not rows:
+        raise RuntimeError(
+            f"{retailer} storefront returned zero rows; refusing to replace the last snapshot"
+        )
     module.write_outputs(rows)
+    snapshot_failure_marker(retailer).unlink(missing_ok=True)
     LOGGER.info("%s storefront snapshot wrote %s rows", retailer, len(rows))
     return {"retailer": retailer, "status": "success", "rows": len(rows)}
 
 
-def rebuild_catalog(input_dir: Path = DEFAULT_INPUT_DIR, output_dir: Path = DEFAULT_OUTPUT_DIR) -> dict[str, Any]:
-    offers, source_files = load_offers(input_dir)
+def rebuild_catalog(
+    input_dir: Path = DEFAULT_INPUT_DIR,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    excluded_retailers: set[str] | None = None,
+) -> dict[str, Any]:
+    offers, source_files = load_offers(input_dir, excluded_retailers=excluded_retailers)
     json_path = write_json_catalog(output_dir, offers, source_files)
     csv_path = write_csv_catalog(output_dir, offers)
     models = build_model_summaries(offers)
@@ -85,6 +114,7 @@ async def update_used_phone_catalog(
                 scraper_results.append(await refresh_storefront_snapshot(retailer))
             except Exception as exc:
                 LOGGER.exception("%s storefront refresh failed", retailer)
+                mark_storefront_refresh_failed(retailer, exc)
                 scraper_results.append(
                     {
                         "retailer": retailer,
@@ -94,9 +124,14 @@ async def update_used_phone_catalog(
                     }
                 )
 
-    catalog_result = rebuild_catalog()
+    failed_retailers = {
+        result["retailer"]
+        for result in scraper_results
+        if result["status"] != "success"
+    }
+    catalog_result = rebuild_catalog(excluded_retailers=failed_retailers)
     return {
-        "status": "completed",
+        "status": "completed_with_errors" if failed_retailers else "completed",
         "scrapers": scraper_results,
         "catalog": catalog_result,
     }

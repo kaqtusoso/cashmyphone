@@ -22,6 +22,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.etree import ElementTree as ET
 
 from bs4 import BeautifulSoup
@@ -73,6 +74,13 @@ CONDITION_LABELS = {
 }
 
 LOGGER = logging.getLogger("happyphone-storefront")
+
+
+def _variant_url(page_url: str, attributes: dict[str, Any]) -> str:
+    parts = urlsplit(page_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update({key: str(value) for key, value in attributes.items() if value})
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 async def _get_text(session: AsyncSession, url: str) -> str:
@@ -182,7 +190,10 @@ def parse_product_page(html: str, page_url: str) -> list[dict[str, Any]]:
                 "reference_price_sek": int(regular_price) if regular_price and regular_price != price else None,
                 "currency": "SEK",
                 "stock": stock,
-                "url": page_url,
+                "url": _variant_url(page_url, attrs),
+                "variant_deep_link": bool(storage_slug and color_slug and condition_slug),
+                "variant_selection_required": False,
+                "variant_url_kind": "woocommerce_attributes",
                 "image_url": image.get("url") or image.get("src"),
             }
         )
@@ -235,6 +246,9 @@ def write_outputs(rows: list[dict[str, Any]]) -> None:
         "currency",
         "stock",
         "url",
+        "variant_deep_link",
+        "variant_selection_required",
+        "variant_url_kind",
         "image_url",
         "scraped_at",
     ]

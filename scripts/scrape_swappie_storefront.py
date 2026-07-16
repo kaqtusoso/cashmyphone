@@ -95,6 +95,9 @@ def parse_phone(phone: dict[str, Any]) -> dict[str, Any] | None:
         "stock": phone.get("stock", 0),
         "stock_per_warehouse": phone.get("stockPerWarehouse") or {},
         "url": url,
+        "variant_deep_link": bool(slug),
+        "variant_selection_required": False,
+        "variant_url_kind": "sku_path",
         "updated_at": phone.get("updatedAt"),
     }
 
@@ -148,6 +151,9 @@ def write_outputs(rows: list[dict[str, Any]]) -> None:
         "currency",
         "stock",
         "url",
+        "variant_deep_link",
+        "variant_selection_required",
+        "variant_url_kind",
         "updated_at",
         "scraped_at",
     ]

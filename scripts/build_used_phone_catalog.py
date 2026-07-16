@@ -44,13 +44,15 @@ RETAILER_LABELS = {
     "telestore": "Telestore",
 }
 
+EXCLUDED_RETAILERS = {"fixiphone"}
+
 CONDITION_LABEL_BY_TIER = {
     "new_like": "Nyskick",
     "excellent": "Utmärkt skick",
     "very_good": "Mycket bra skick",
     "good": "Bra skick",
     "fair": "Okej skick",
-    "unknown": "Ej angivet",
+    "unknown": "Oklart",
 }
 
 KNOWN_MODEL_DISPLAY_BY_KEY = {
@@ -288,6 +290,64 @@ def extract_battery_health(*values: Any) -> str | None:
     return None
 
 
+def resolve_battery_health(
+    retailer: str,
+    battery_type: str | None,
+    condition: str | None,
+    explicit_health: str | None,
+) -> tuple[str | None, str, str]:
+    """Return battery percentage, semantics and provenance.
+
+    Retailer-wide guarantees are minimums, not measurements of an individual
+    device. Only percentages supplied for a specific variant are marked exact.
+    """
+    if explicit_health:
+        return explicit_health, "exact", "retailer_variant"
+
+    retailer_key = retailer.lower()
+    battery_key = (battery_type or "").lower()
+    condition_key = (condition or "").lower()
+
+    if retailer_key == "swappie":
+        # Swappie's API uses Premium for the new-battery option and Prime for
+        # the >=95% battery used by its Premium Series. Standard is >=86%.
+        if "premium" in battery_key or "nytt" in battery_key:
+            return "100%", "exact", "retailer_battery_option"
+        if "prime" in battery_key or "plus" in battery_key:
+            return "95%", "minimum", "retailer_battery_option"
+        return "86%", "minimum", "retailer_guarantee"
+
+    if retailer_key == "phonehero":
+        if "nytt" in battery_key:
+            return "100%", "exact", "retailer_battery_option"
+        return "85%", "minimum", "retailer_guarantee"
+
+    if retailer_key == "fixmyphone":
+        return "85%", "minimum", "retailer_guarantee"
+
+    if retailer_key == "happyphone":
+        # HappyPhone currently publishes both 80% and 85% on the same product
+        # pages. Use the lower explicit guarantee until their copy is coherent.
+        return "80%", "minimum", "retailer_guarantee"
+
+    if retailer_key == "renewed":
+        if "premium" in condition_key or "helt ny" in condition_key:
+            return "100%", "exact", "retailer_condition_policy"
+        return "80%", "minimum", "retailer_guarantee"
+
+    return None, "unknown", "not_published"
+
+
+def infer_battery_health(
+    retailer: str,
+    battery_type: str | None,
+    explicit_health: str | None,
+    condition: str | None = None,
+) -> str | None:
+    """Backward-compatible percentage-only helper."""
+    return resolve_battery_health(retailer, battery_type, condition, explicit_health)[0]
+
+
 def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | None:
     retailer = _clean_text(row.get("retailer"))
     sku = _clean_text(row.get("sku"))
@@ -299,6 +359,8 @@ def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | 
 
     if not retailer or not sku or not model or not price_sek or not url:
         return None
+    if retailer in EXCLUDED_RETAILERS:
+        return None
     if stock is not None and stock <= 0:
         return None
     if not is_valid_storage_for_model(model, storage_gb):
@@ -308,7 +370,12 @@ def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | 
     condition_tier = normalize_condition_tier(condition_raw)
     condition_mapping = map_used_phone_condition(retailer, condition_raw)
     battery_type = _clean_text(row.get("battery_type"))
-    battery_health = extract_battery_health(row.get("battery_health"), row.get("color"), row.get("condition_grade"))
+    battery_health, battery_health_kind, battery_health_source = resolve_battery_health(
+        retailer,
+        battery_type,
+        condition_raw,
+        extract_battery_health(row.get("battery_health"), row.get("color"), row.get("condition_grade")),
+    )
     reference_price_sek = parse_int(row.get("reference_price_sek"))
     offer_id = slugify(f"{retailer}-{sku}-{model}-{storage_gb or 'na'}")
 
@@ -332,11 +399,21 @@ def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | 
         "legacy_condition_label": CONDITION_LABEL_BY_TIER[condition_tier],
         "battery_type": battery_type,
         "battery_health": battery_health,
-        "has_new_battery": bool(battery_type and "nytt batteri" in battery_type.lower()),
+        "battery_health_kind": battery_health_kind,
+        "battery_health_source": battery_health_source,
+        "has_new_battery": bool(
+            battery_health == "100%"
+            and battery_health_source in {"retailer_battery_option", "retailer_condition_policy"}
+        ),
         "price_sek": price_sek,
         "reference_price_sek": reference_price_sek,
         "currency": _clean_text(row.get("currency")) or "SEK",
         "stock": stock if stock is not None else 1,
+        "inventory_verified": bool(row.get("inventory_verified")),
+        "retailer_variant_id": _clean_text(row.get("variant_id") or row.get("variation_id")),
+        "variant_deep_link": bool(row.get("variant_deep_link")),
+        "variant_selection_required": bool(row.get("variant_selection_required")),
+        "variant_url_kind": _clean_text(row.get("variant_url_kind")),
         "lead_url": url,
         "image_url": _clean_text(row.get("image_url")),
         "scraped_at": _clean_text(row.get("scraped_at")),
@@ -344,18 +421,37 @@ def normalize_offer(row: dict[str, Any], source_file: Path) -> dict[str, Any] | 
     }
 
 
-def load_offers(input_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def load_offers(
+    input_dir: Path,
+    excluded_retailers: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     offers_by_id: dict[str, dict[str, Any]] = {}
     source_files: list[dict[str, Any]] = []
+    excluded = excluded_retailers or set()
 
     for path in sorted(input_dir.glob(INPUT_GLOB)):
         if path.name.startswith("used_phone_catalog_"):
             continue
         rows = json.loads(path.read_text())
-        source_files.append({"file": path.name, "rows": len(rows)})
+        source_retailer = path.name.removesuffix("_storefront_latest.json")
+        source_metadata: dict[str, Any] = {"file": path.name, "rows": len(rows)}
+        failure_marker = path.with_suffix(".failed.json")
+        refresh_failed = (
+            failure_marker.exists()
+            and failure_marker.stat().st_mtime >= path.stat().st_mtime
+        )
+        if refresh_failed:
+            source_metadata["excluded"] = "latest refresh failed"
+            source_files.append(source_metadata)
+            continue
+        if source_retailer in excluded:
+            source_metadata["excluded"] = "latest refresh failed"
+            source_files.append(source_metadata)
+            continue
+        source_files.append(source_metadata)
         for row in rows:
             offer = normalize_offer(row, path)
-            if not offer:
+            if not offer or offer["retailer"] in excluded:
                 continue
             existing = offers_by_id.get(offer["id"])
             if existing is None or offer["price_sek"] < existing["price_sek"]:
@@ -428,7 +524,42 @@ def build_filter_options(offers: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def validate_variant_links(offers: list[dict[str, Any]]) -> None:
+    ambiguous = [
+        offer
+        for offer in offers
+        if not offer.get("variant_deep_link")
+        and not offer.get("variant_selection_required")
+    ]
+    if ambiguous:
+        sample = ", ".join(offer["id"] for offer in ambiguous[:5])
+        raise RuntimeError(
+            "Used-phone offers have neither an exact variant URL nor a selection warning: "
+            f"{len(ambiguous)} offer(s) ({sample})"
+        )
+
+    offers_by_url: dict[str, list[dict[str, Any]]] = {}
+    for offer in offers:
+        offers_by_url.setdefault(offer["lead_url"], []).append(offer)
+
+    misleading_shared_urls = [
+        url
+        for url, url_offers in offers_by_url.items()
+        if len(url_offers) > 1
+        and any(
+            offer.get("variant_deep_link") or not offer.get("variant_selection_required")
+            for offer in url_offers
+        )
+    ]
+    if misleading_shared_urls:
+        raise RuntimeError(
+            "Variant-specific offers unexpectedly share an outbound URL: "
+            + ", ".join(misleading_shared_urls[:5])
+        )
+
+
 def write_json_catalog(output_dir: Path, offers: list[dict[str, Any]], source_files: list[dict[str, Any]]) -> Path:
+    validate_variant_links(offers)
     generated_at = datetime.now(timezone.utc).isoformat()
     catalog = {
         "generated_at": generated_at,
@@ -467,11 +598,18 @@ def write_csv_catalog(output_dir: Path, offers: list[dict[str, Any]]) -> Path:
         "legacy_condition_label",
         "battery_type",
         "battery_health",
+        "battery_health_kind",
+        "battery_health_source",
         "has_new_battery",
         "price_sek",
         "reference_price_sek",
         "currency",
         "stock",
+        "inventory_verified",
+        "retailer_variant_id",
+        "variant_deep_link",
+        "variant_selection_required",
+        "variant_url_kind",
         "lead_url",
         "image_url",
         "scraped_at",

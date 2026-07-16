@@ -99,8 +99,11 @@ def _is_accessory(title: str) -> bool:
     return any(keyword in lowered for keyword in ACCESSORY_KEYWORDS)
 
 
-def _product_url(handle: str | None) -> str:
-    return f"{BASE_URL}/products/{handle}" if handle else BASE_URL
+def _product_url(handle: str | None, variant_id: Any = None) -> str:
+    if not handle:
+        return BASE_URL
+    url = f"{BASE_URL}/products/{handle}"
+    return f"{url}?variant={variant_id}" if variant_id else url
 
 
 def _image_url(variant: dict[str, Any], product: dict[str, Any]) -> str | None:
@@ -177,7 +180,10 @@ def parse_products(products: list[dict[str, Any]], include_all_phones: bool = Fa
                     "reference_price_sek": _parse_price(variant.get("compare_at_price")),
                     "currency": "SEK",
                     "stock": 1,
-                    "url": _product_url(handle),
+                    "url": _product_url(handle, variant.get("id")),
+                    "variant_deep_link": bool(variant.get("id")),
+                    "variant_selection_required": False,
+                    "variant_url_kind": "shopify_variant",
                     "image_url": _image_url(variant, product),
                 }
             )
@@ -229,6 +235,9 @@ def write_outputs(rows: list[dict[str, Any]]) -> None:
         "currency",
         "stock",
         "url",
+        "variant_deep_link",
+        "variant_selection_required",
+        "variant_url_kind",
         "image_url",
         "scraped_at",
     ]

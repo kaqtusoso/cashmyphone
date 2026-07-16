@@ -113,6 +113,9 @@ def parse_category(html: str, include_all_phones: bool = False) -> list[dict[str
                 "currency": "SEK",
                 "stock": 1,
                 "url": url,
+                "variant_deep_link": True,
+                "variant_selection_required": False,
+                "variant_url_kind": "unique_product",
                 "image_url": image.get("data-src") or image.get("data-original") or image.get("src") if image else None,
             }
         )
@@ -152,6 +155,9 @@ def write_outputs(rows: list[dict[str, Any]]) -> None:
         "currency",
         "stock",
         "url",
+        "variant_deep_link",
+        "variant_selection_required",
+        "variant_url_kind",
         "image_url",
         "scraped_at",
     ]
