@@ -49,11 +49,13 @@ def _canonical_prices(prices: Iterable[Mapping[str, Any]]) -> dict[PriceKey, dic
             "url": raw.get("url"),
         }
         previous = canonical.get(key)
-        if previous and (
-            previous["price_sek"] != row["price_sek"]
-            or previous["currency"] != row["currency"]
-        ):
-            raise ValueError(f"Motstridiga priser för samma nyckel: {key}")
+        if previous:
+            # Äldre produktionsdata kan innehålla flera rader för samma
+            # modell/lagring/skick. Offertflödet använder det högsta priset,
+            # så historiken normaliseras till samma observerbara bud.
+            if row["price_sek"] > previous["price_sek"]:
+                canonical[key] = row
+            continue
         canonical[key] = row
     return canonical
 

@@ -79,6 +79,24 @@ class PriceHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot_count, 2)
         self.assertEqual(current_count, 2)
 
+    async def test_duplicate_key_keeps_the_highest_observable_offer(self):
+        duplicate_prices = self.prices(include_second=False)
+        duplicate_prices.append({**duplicate_prices[0], "price_sek": 5300})
+
+        async with self.sessions() as db:
+            stats = await replace_current_buyback_prices(
+                db,
+                retailer="demo",
+                prices=duplicate_prices,
+                captured_at=self.start,
+                source="scraper",
+            )
+            await db.commit()
+            current = (await db.execute(select(BuybackPrice))).scalar_one()
+
+        self.assertEqual(stats.rows, 1)
+        self.assertEqual(current.price_sek, 5300)
+
     async def test_changed_removed_and_added_prices_create_periods(self):
         async with self.sessions() as db:
             await replace_current_buyback_prices(
