@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -9,6 +9,17 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
+
+USED_PHONE_CATALOG_STARTUP_DELAY_SECONDS = 20
+USED_PHONE_CATALOG_MISFIRE_GRACE_SECONDS = 12 * 60 * 60
+
+
+def _used_phone_catalog_startup_run_date(now: datetime | None = None) -> datetime:
+    """Return an aware instant so host timezone cannot shift the startup job."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError("Startup run date requires a timezone-aware datetime")
+    return current + timedelta(seconds=USED_PHONE_CATALOG_STARTUP_DELAY_SECONDS)
 
 
 async def scrape_if_prices_empty():
@@ -87,21 +98,21 @@ def setup_scheduler():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=900,
+        misfire_grace_time=USED_PHONE_CATALOG_MISFIRE_GRACE_SECONDS,
     )
 
     if settings.used_phone_catalog_update_on_startup:
         scheduler.add_job(
             scheduled_used_phone_catalog,
             trigger=DateTrigger(
-                run_date=datetime.now() + timedelta(seconds=20),
+                run_date=_used_phone_catalog_startup_run_date(),
                 timezone=settings.scrape_timezone,
             ),
             id="used_phone_catalog_startup_refresh",
             name="Uppdatera begagnat-katalog efter startup",
             replace_existing=True,
             max_instances=1,
-            misfire_grace_time=300,
+            misfire_grace_time=USED_PHONE_CATALOG_MISFIRE_GRACE_SECONDS,
         )
 
     scheduler.start()

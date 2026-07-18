@@ -163,6 +163,7 @@ def parse_product_page(html: str, page_url: str) -> list[dict[str, Any]]:
     model = _extract_model_name(soup, page_url)
     variants = json.loads(html_lib.unescape(form.get("data-product_variations") or "[]"))
     rows: list[dict[str, Any]] = []
+    seen_variant_urls: set[str] = set()
 
     for variant in variants:
         stock = _extract_stock(variant)
@@ -175,6 +176,15 @@ def parse_product_page(html: str, page_url: str) -> list[dict[str, Any]]:
         price = variant.get("display_price")
         regular_price = variant.get("display_regular_price")
         image = variant.get("image") or {}
+        variant_url = _variant_url(page_url, attrs)
+
+        # WooCommerce can retain multiple internal variation IDs for the same
+        # visible attribute combination. Its storefront resolves that selection
+        # to the first matching stocked variation, so expose that combination
+        # once instead of publishing several offers with the same destination.
+        if variant_url in seen_variant_urls:
+            continue
+        seen_variant_urls.add(variant_url)
 
         rows.append(
             {
@@ -190,7 +200,7 @@ def parse_product_page(html: str, page_url: str) -> list[dict[str, Any]]:
                 "reference_price_sek": int(regular_price) if regular_price and regular_price != price else None,
                 "currency": "SEK",
                 "stock": stock,
-                "url": _variant_url(page_url, attrs),
+                "url": variant_url,
                 "variant_deep_link": bool(storage_slug and color_slug and condition_slug),
                 "variant_selection_required": False,
                 "variant_url_kind": "woocommerce_attributes",
