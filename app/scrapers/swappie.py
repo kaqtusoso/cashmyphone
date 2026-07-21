@@ -7,15 +7,16 @@ direkta API-anrop utan att kräva manuell webbsession. Om det slutar ge resultat
 faller scrapern tillbaka till Playwright och fetch inne i browser-context.
 
 Swappie exponerar ett öppet API som returnerar inköpspriser för alla kombinationer
-av visuellt skick (5 nivåer) och funktionella fel (16 kombinationer = 2^4 flaggor).
-Totalt 80 rader per modell + lagring.
+av visuellt skick och funktionella flaggor. API:t innehåller även BROKEN-rader,
+trots att det svenska säljflödet stoppar telefoner som inte klarar
+funktionskollen. De raderna filtreras därför bort innan import.
 
 ─── Condition-nyckelformat (lagras i condition-kolumnen) ─────────────────────
 Utan funktionella fel:  "LIKE_NEW"
-Med funktionella fel:   "LIKE_NEW:B,BAT,BG,BS"   (alfabetisk ordning)
+Med tillåtna skickfel:  "LIKE_NEW:BAT,BG,BS"   (alfabetisk ordning)
 
 Funktionskoder:
-  B   = BROKEN        – startar ej (Nej på funktionskontroll)
+  B   = BROKEN        – underkänd funktionskoll (filtreras alltid bort)
   BAT = BATTERY_ISSUE – batterihälsa under 86%
   BG  = BROKEN_GLASS  – flisor eller kraftiga repor på skärmglas
   BS  = BROKEN_SCREEN – skärmen fungerar ej (fläckar, pixlar, linjer)
@@ -85,18 +86,19 @@ FUNC_ABBREV: Dict[str, str] = {
     "BROKEN_SCREEN": "BS",
 }
 
-# Alla iPhones Swappie tar emot (Swappies namnformat)
+INELIGIBLE_FUNCTIONAL_CONDITIONS = {"BROKEN"}
+
+# Modellerna som är valbara i Swappies svenska säljflöde. Pris-API:t kan
+# fortfarande returnera priser för utgångna modeller, så modellväljaren är
+# källan till sanningen. Verifierad 2026-07-21.
 IPHONE_MODELS: List[str] = [
-    "iPhone Air",
-    "iPhone 17 Pro Max", "iPhone 17 Pro", "iPhone 17",
-    "iPhone 16 Pro Max", "iPhone 16 Pro", "iPhone 16 Plus", "iPhone 16",
+    "iPhone 17 Pro Max", "iPhone 17 Pro", "iPhone Air", "iPhone 17", "iPhone 17e",
+    "iPhone 16 Pro Max", "iPhone 16 Pro", "iPhone 16 Plus", "iPhone 16e", "iPhone 16",
     "iPhone 15 Pro Max", "iPhone 15 Pro", "iPhone 15 Plus", "iPhone 15",
     "iPhone 14 Pro Max", "iPhone 14 Pro", "iPhone 14 Plus", "iPhone 14",
-    "iPhone 13 Pro Max", "iPhone 13 Pro", "iPhone 13 Mini", "iPhone 13",
-    "iPhone 12 Pro Max", "iPhone 12 Pro", "iPhone 12 Mini", "iPhone 12",
-    "iPhone 11 Pro Max", "iPhone 11 Pro", "iPhone 11",
-    "iPhone SE 2022", "iPhone SE 2020",
-    "iPhone XS Max", "iPhone XS", "iPhone XR",
+    "iPhone 13 Pro Max", "iPhone 13 Pro", "iPhone 13", "iPhone 13 mini",
+    "iPhone 12 Pro Max", "iPhone 12 Pro", "iPhone 12", "iPhone 12 mini",
+    "iPhone SE 2022",
 ]
 
 SELL_URL = "https://swappie.com/se/salj-din-iphone/"
@@ -123,10 +125,8 @@ def _condition_key(visual: str, functional: List[str]) -> str:
       ("LIKE_NEW", [])                              → "LIKE_NEW"
       ("GOOD", ["BROKEN_SCREEN", "BATTERY_ISSUE"])  → "GOOD:BAT,BS"
     """
-    if not functional:
-        return visual
     abbrevs = sorted(FUNC_ABBREV[f] for f in functional if f in FUNC_ABBREV)
-    return f"{visual}:{','.join(abbrevs)}"
+    return f"{visual}:{','.join(abbrevs)}" if abbrevs else visual
 
 
 def _parse_storage_gb(model_name: str) -> Optional[int]:
@@ -264,7 +264,9 @@ def _parse_results(results: List[Dict]) -> List[Dict]:
         if not visual:
             continue
 
-        functional: List[str] = r.get("functional_condition", [])
+        functional: List[str] = r.get("functional_condition") or []
+        if INELIGIBLE_FUNCTIONAL_CONDITIONS.intersection(functional):
+            continue
 
         raw_model = r.get("model_name", "")
         storage_gb = _parse_storage_gb(raw_model)

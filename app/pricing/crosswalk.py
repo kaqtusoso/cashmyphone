@@ -9,14 +9,14 @@ egna skick-system.
   screen_surface   – skärmens visuella slitage: LIKE_NEW | ALMOST_NEW | GOOD | MODERATE
   sides_surface    – sidornas visuella slitage: samma skala
   back_surface     – baksidans skick: MODERATE = sprucken/trasig
-  is_broken        – enheten startar ej          (Swappie: B)
+  is_broken        – underkänd funktionskoll     (Swappie: inget bud)
   is_screen_broken – skärm fungerar ej           (Swappie: BS)
   is_glass_broken  – skärmglas sprucket/repor    (Swappie: BG)
   is_battery_low   – batteri under tröskeln      (Swappie: BAT, tröskel 86%)
   is_water_damaged – böjd, vatten, Face/Touch ID (Swappie: → MODERATE visuellt)
 
 ─── Condition-nyckelformat per återförsäljare ────────────────────────────────
-  Swappie:     "LIKE_NEW"  /  "GOOD:B,BAT,BG,BS"
+  Swappie:     None om funktionskollen underkänns, annars "LIKE_NEW" / "GOOD:BAT,BG,BS"
   FixMyPhone:  "like_new"  /  "good:no_battery:no_display"
   HappyPhone:  identisk med FixMyPhone
   Telestore:   "nyskick"   /  "bra:bat:sidor"  /  "water_damaged"
@@ -50,7 +50,7 @@ class FormAnswers:
     screen_surface:   str          # LIKE_NEW | ALMOST_NEW | GOOD | MODERATE
     sides_surface:    str
     back_surface:     str          # MODERATE = sprucken/trasig
-    is_broken:        bool = False  # startar ej
+    is_broken:        bool = False  # minst ett fel i den samlade funktionskollen
     is_screen_broken: bool = False  # skärmfunktion trasig (fläckar/linjer)
     is_glass_broken:  bool = False  # skärmglas sprucket/allvarliga repor
     is_battery_low:   bool = False  # batteri under tröskeln
@@ -60,13 +60,17 @@ class FormAnswers:
 # ─── Swappie ──────────────────────────────────────────────────────────────────
 
 _SWAPPIE_FUNC: Dict[str, str] = {
-    "is_broken":        "B",
     "is_battery_low":   "BAT",
     "is_glass_broken":  "BG",
     "is_screen_broken": "BS",
 }
 
-def swappie_condition(a: FormAnswers) -> str:
+def swappie_condition(a: FormAnswers) -> Optional[str]:
+    # Swappies svenska säljflöde visar "Ej kvalificerad" när någon del av
+    # funktionskollen underkänns. Televeras is_broken samlar alla sådana fel.
+    if a.is_broken:
+        return None
+
     visual = _worst(a.screen_surface, a.sides_surface, a.back_surface)
     if a.is_water_damaged:
         visual = "MODERATE"
