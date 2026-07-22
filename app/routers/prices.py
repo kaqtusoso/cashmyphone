@@ -1,7 +1,10 @@
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, Query, HTTPException, Header, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 from ..database import get_db
@@ -18,6 +21,40 @@ from ..pricing.history import replace_current_buyback_prices
 from ..config import settings
 
 router = APIRouter(prefix="/api", tags=["prices"])
+logger = logging.getLogger(__name__)
+
+
+async def _refresh_telestore_quote(
+    quote: "RetailerQuote",
+    storage_gb: int,
+) -> Optional["RetailerQuote"]:
+    """Verifiera Telestore live och dölj budet om det inte kan bekräftas."""
+    if quote.retailer.lower() != "telestore":
+        return quote
+    if not quote.url:
+        return None
+    try:
+        from ..scrapers.telestore import TelestoreScraper
+
+        live = await asyncio.wait_for(
+            TelestoreScraper().fetch_live_quote(
+                quote.url,
+                storage_gb,
+                quote.condition_key,
+            ),
+            timeout=5,
+        )
+        if live and int(live["price_sek"]) > 0:
+            return RetailerQuote(
+                retailer=quote.retailer,
+                condition_key=quote.condition_key,
+                price_sek=int(live["price_sek"]),
+                url=quote.url,
+                scraped_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+    except Exception as exc:
+        logger.warning("Telestore live-verifiering misslyckades: %s", exc)
+    return None
 
 
 def _normalize_iphone_model(model: str) -> str:
@@ -298,6 +335,14 @@ async def get_quote(
             url=row.url,
             scraped_at=row.scraped_at,
         ))
+
+    # Telestore kan ändra pris mellan de schemalagda fullscraperna. Kontrollera
+    # därför deras valda rad direkt i officiella API:t innan budet visas.
+    refreshed_quotes = await asyncio.gather(*(
+        _refresh_telestore_quote(quote, req.storage_gb)
+        for quote in quotes
+    ))
+    quotes = [quote for quote in refreshed_quotes if quote is not None]
 
     # Sortera fallande på pris
     quotes.sort(key=lambda q: q.price_sek, reverse=True)

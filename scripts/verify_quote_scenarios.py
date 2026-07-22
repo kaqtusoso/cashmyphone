@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.pricing.crosswalk import FormAnswers, all_conditions, phonehero_conditions
 from app.routers.prices import _phonehero_ignores_battery
+from app.scrapers.telestore import TelestoreScraper
 
 
 API_BASE = os.environ.get(
@@ -140,6 +141,14 @@ async def verify() -> List[dict]:
                 rows = [row for group in results for row in group]
                 rows = [row for row in rows if row.get("price_sek", 0) > 0]
                 best = max(rows, key=lambda row: row["price_sek"], default=None)
+                if retailer == "telestore" and best and best.get("url"):
+                    live = await TelestoreScraper().fetch_live_quote(
+                        best["url"],
+                        scenario.storage_gb,
+                        best["condition"],
+                    )
+                    if live:
+                        best = {**best, "price_sek": live["price_sek"]}
                 quotes[retailer] = {
                     "condition": best["condition"] if best else keys,
                     "price_sek": best["price_sek"] if best else None,

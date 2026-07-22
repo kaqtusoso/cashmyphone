@@ -44,8 +44,10 @@ import asyncio
 import logging
 import re
 import json
+from time import monotonic
 from itertools import product
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -91,6 +93,8 @@ SKICK_OPTIONS: List[Tuple[int, str]] = [
 ]
 
 MIN_PRICE = 1  # Inkludera alla bud — även 60 kr är ett giltigt bud
+LIVE_QUOTE_CACHE_SECONDS = 60
+_live_quote_cache: Dict[Tuple[str, int, str], Tuple[float, Dict[str, Any]]] = {}
 
 
 def _build_options(skick_id: int, batteri_id: int, sidor_id: int) -> List[Dict]:
@@ -110,6 +114,21 @@ def _condition_key(skick_label: str, batteri_id: int, sidor_id: int) -> str:
     if sidor_id == OPT_SIDOR_TRASIG:
         key += ":sidor"
     return key
+
+
+def _condition_selection(condition: str) -> Optional[Tuple[int, int, int]]:
+    """Översätt en lagrad Telestore-nyckel tillbaka till officiella option-ID:n."""
+    parts = condition.lower().split(":")
+    suffixes = set(parts[1:])
+    if suffixes - {"bat", "sidor"}:
+        return None
+    skick_by_label = {label: option_id for option_id, label in SKICK_OPTIONS}
+    skick_id = skick_by_label.get(parts[0])
+    if skick_id is None:
+        return None
+    batteri_id = OPT_BATTERI_LAG if "bat" in suffixes else OPT_BATTERI_OK
+    sidor_id = OPT_SIDOR_TRASIG if "sidor" in suffixes else OPT_SIDOR_OK
+    return skick_id, batteri_id, sidor_id
 
 
 def _storage_gb(space: int) -> int:
@@ -157,6 +176,80 @@ class TelestoreScraper(BaseScraper):
         }
         | {"water_damaged"}
     )
+
+    async def fetch_live_quote(
+        self,
+        model_url: str,
+        storage_gb: int,
+        condition: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Hämta ett enskilt kundbud direkt från Telestores officiella API.
+
+        Den periodiska fullscrapen är fortsatt källan till prismatrisen. Den här
+        kontrollen görs vid offertögonblicket så att en prisändring mellan två
+        schemalagda körningar inte visas som ett gammalt bud för kunden.
+        """
+        parsed = urlparse(model_url)
+        if parsed.scheme != "https" or parsed.hostname not in {
+            "telestore.se", "www.telestore.se",
+        }:
+            return None
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if len(path_parts) != 2 or path_parts[0] != "salja-mobil":
+            return None
+        slug = path_parts[1]
+
+        normalized_condition = condition.lower()
+        if (
+            normalized_condition != "water_damaged"
+            and _condition_selection(normalized_condition) is None
+        ):
+            return None
+
+        cache_key = (slug, storage_gb, normalized_condition)
+        cached = _live_quote_cache.get(cache_key)
+        if cached and monotonic() - cached[0] < LIVE_QUOTE_CACHE_SECONDS:
+            return dict(cached[1])
+
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            follow_redirects=True,
+            headers=HEADERS,
+        ) as client:
+            model = await self._fetch_model_data(client, slug)
+            if not model:
+                return None
+            storage = next(
+                (
+                    item for item in model["storages"]
+                    if _storage_gb(int(item["space"])) == storage_gb
+                ),
+                None,
+            )
+            if storage is None:
+                return None
+
+            if normalized_condition == "water_damaged":
+                quote = await self._fetch_water_damaged(client, slug, model, storage)
+            else:
+                selection = _condition_selection(normalized_condition)
+                if selection is None:
+                    return None
+                skick_id, batteri_id, sidor_id = selection
+                quote = await self._fetch_price(
+                    client,
+                    slug,
+                    model,
+                    storage,
+                    skick_id,
+                    normalized_condition.split(":", 1)[0],
+                    batteri_id,
+                    sidor_id,
+                )
+
+        if quote:
+            _live_quote_cache[cache_key] = (monotonic(), dict(quote))
+        return quote
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

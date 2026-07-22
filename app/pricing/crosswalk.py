@@ -238,7 +238,14 @@ def telestore_condition(a: FormAnswers) -> Optional[str]:
         return "water_damaged"
 
     # Skickfrågan avser hela telefonen. Sprickor hanteras separat av :sidor.
-    screen_for_skick = "LIKE_NEW" if _glass_cracked(a) else a.screen_surface
+    if _glass_cracked(a):
+        screen_for_skick = "LIKE_NEW"
+    elif _glass_scratched(a):
+        # TeleStore beskriver "Okej" som mycket repor. Televeras separata
+        # val för djupa skärmrepor hör därför hemma där, inte i "Bra".
+        screen_for_skick = "MODERATE"
+    else:
+        screen_for_skick = a.screen_surface
     sides_for_skick = "LIKE_NEW" if _sides_cracked(a) else a.sides_surface
     back_for_skick = "LIKE_NEW" if _back_cracked(a) else a.back_surface
     base_visual = _worst(screen_for_skick, sides_for_skick, back_for_skick)

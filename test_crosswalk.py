@@ -1,4 +1,6 @@
 import unittest
+from datetime import datetime
+from unittest.mock import AsyncMock, patch
 
 from app.pricing.crosswalk import (
     FormAnswers,
@@ -10,7 +12,12 @@ from app.pricing.crosswalk import (
     swappie_condition,
     telestore_condition,
 )
-from app.routers.prices import _phonehero_ignores_battery
+from app.routers.prices import (
+    RetailerQuote,
+    _phonehero_ignores_battery,
+    _refresh_telestore_quote,
+)
+from app.scrapers.telestore import _condition_selection
 
 
 class CrosswalkRegressionTests(unittest.TestCase):
@@ -49,7 +56,7 @@ class CrosswalkRegressionTests(unittest.TestCase):
         )
 
         self.assertEqual(fixmyphone_condition(answers), "good:no_display")
-        self.assertEqual(telestore_condition(answers), "bra")
+        self.assertEqual(telestore_condition(answers), "okej")
         self.assertIn(
             "s=ms|b=n|d=no|c=no|bt=ok",
             phonehero_conditions(answers, model="iPhone 13"),
@@ -71,6 +78,16 @@ class CrosswalkRegressionTests(unittest.TestCase):
 
         self.assertEqual(telestore_condition(worn_back), "bra")
         self.assertEqual(telestore_condition(cracked_back), "nyskick:sidor")
+
+    def test_telestore_deep_scratches_select_official_okej_options(self):
+        answers = FormAnswers(
+            "GOOD", "ALMOST_NEW", "GOOD",
+            is_glass_scratched=True,
+            is_battery_low=True,
+            battery_health_percent=82,
+        )
+        self.assertEqual(telestore_condition(answers), "okej:bat")
+        self.assertEqual(_condition_selection("okej:bat"), (30, 49, 34))
 
     def test_phonehero_sides_crack_uses_sprickor_for_legacy_family(self):
         answers = FormAnswers(
@@ -169,6 +186,40 @@ class CrosswalkRegressionTests(unittest.TestCase):
 
         self.assertFalse(_phonehero_ignores_battery("iPhone 15 Pro"))
         self.assertIn("s=n|b=n|d=no|c=no|bt=low", phonehero_conditions(answers))
+
+
+class TelestoreLiveQuoteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live_price_replaces_stale_database_price(self):
+        stale = RetailerQuote(
+            retailer="telestore",
+            condition_key="nyskick",
+            price_sek=8400,
+            url="https://telestore.se/salja-mobil/iphone-16-pro/",
+            scraped_at=datetime(2026, 7, 22, 16, 1),
+        )
+        with patch(
+            "app.scrapers.telestore.TelestoreScraper.fetch_live_quote",
+            new=AsyncMock(return_value={"price_sek": 8500}),
+        ):
+            refreshed = await _refresh_telestore_quote(stale, 256)
+
+        self.assertEqual(refreshed.price_sek, 8500)
+
+    async def test_telestore_offer_is_hidden_when_live_check_fails(self):
+        stale = RetailerQuote(
+            retailer="telestore",
+            condition_key="okej:bat",
+            price_sek=1410,
+            url="https://telestore.se/salja-mobil/iphone-13/",
+            scraped_at=datetime(2026, 7, 22, 16, 1),
+        )
+        with patch(
+            "app.scrapers.telestore.TelestoreScraper.fetch_live_quote",
+            new=AsyncMock(side_effect=TimeoutError),
+        ):
+            refreshed = await _refresh_telestore_quote(stale, 128)
+
+        self.assertIsNone(refreshed)
 
 
 if __name__ == "__main__":
