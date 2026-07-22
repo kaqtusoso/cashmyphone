@@ -14,6 +14,7 @@ Condition-nycklarna hålls medvetet korta och stabila:
 import asyncio
 import logging
 import re
+from time import monotonic
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -45,6 +46,8 @@ CONDITION_KEYS = {
 }
 
 STORAGE_RE = re.compile(r"(\d+)\s*(GB|TB)", re.I)
+LIVE_QUOTE_CACHE_SECONDS = 60
+_live_quote_cache: Dict[tuple[str, int, str], tuple[float, Dict[str, Any]]] = {}
 
 
 def _parse_price(value: Any) -> int:
@@ -73,6 +76,73 @@ class RenewedScraper(BaseScraper):
     min_models = 20
     min_rows = 200
     expected_conditions = frozenset(CONDITION_KEYS.values())
+
+    async def fetch_live_quote(
+        self,
+        model_name: str,
+        storage_gb: int,
+        condition: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Hämta vald skickrad direkt från reNeweds officiella Reusely-API."""
+        normalized_model = " ".join(model_name.lower().split())
+        normalized_condition = condition.lower()
+        cache_key = (normalized_model, storage_gb, normalized_condition)
+        cached = _live_quote_cache.get(cache_key)
+        if cached and monotonic() - cached[0] < LIVE_QUOTE_CACHE_SECONDS:
+            return dict(cached[1])
+
+        async with httpx.AsyncClient(
+            base_url=API_BASE,
+            timeout=settings.request_timeout_seconds,
+            follow_redirects=True,
+            headers=HEADERS,
+        ) as client:
+            models = await self._get_iphone_models(client)
+            model = next(
+                (
+                    item for item in models
+                    if _model_name(item.get("name", "")).lower() == normalized_model
+                ),
+                None,
+            )
+            if not model:
+                return None
+
+            spec_response = await client.get(
+                f"/v2/widget/catalog/model-device/apple/{model['slug']}",
+                params={"is_paginate": 1, "page": 1},
+            )
+            spec_response.raise_for_status()
+            spec = spec_response.json().get("result", {})
+            sizes = ((spec.get("options") or {}).get("size") or {}).get("choices") or []
+            size = next(
+                (item for item in sizes if _parse_storage(item.get("name", "")) == storage_gb),
+                None,
+            )
+            if not size or not size.get("slug"):
+                return None
+
+            conditions = await self._get_conditions(client, model["slug"], size["slug"])
+
+        match = next(
+            (
+                item for item in conditions
+                if CONDITION_KEYS.get(item.get("name"), "").lower() == normalized_condition
+            ),
+            None,
+        )
+        price = _parse_price(match.get("price")) if match else 0
+        if price <= 0:
+            return None
+        quote = {
+            "model": _model_name(model.get("name", "")),
+            "storage_gb": storage_gb,
+            "condition": normalized_condition,
+            "price_sek": price,
+            "url": SELL_URL,
+        }
+        _live_quote_cache[cache_key] = (monotonic(), dict(quote))
+        return quote
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

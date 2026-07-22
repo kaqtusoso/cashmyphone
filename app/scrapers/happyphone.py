@@ -50,8 +50,10 @@ import asyncio
 import json
 import logging
 import re
+from time import monotonic
 from itertools import product as iterproduct
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -75,6 +77,8 @@ HEADERS = {
 
 CONDITIONS = ["like_new", "very_good", "good", "acceptable"]
 MIN_PRICE = 1
+LIVE_QUOTE_CACHE_SECONDS = 60
+_live_quote_cache: Dict[Tuple[str, int, str], Tuple[float, Dict[str, Any]]] = {}
 
 # Verifierade säljslugar (har data-calc) — används som fallback om sitatemap är otillgänglig.
 # OBS: flera modeller har slug-suffix "-2" för säljsidan (köpsidan saknar suffixet).
@@ -299,6 +303,52 @@ class HappyPhoneScraper(BaseScraper):
         }
         | {"water_damaged"}
     )
+
+    async def fetch_live_quote(
+        self,
+        model_url: str,
+        storage_gb: int,
+        condition: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Beräkna vald rad från HappyPhones aktuella officiella data-calc."""
+        parsed_url = urlparse(model_url)
+        if parsed_url.scheme != "https" or parsed_url.hostname not in {
+            "happyphone.se", "www.happyphone.se",
+        }:
+            return None
+        parts = [part for part in parsed_url.path.split("/") if part]
+        if len(parts) != 2 or parts[0] != "product":
+            return None
+        slug = parts[1]
+        normalized_condition = condition.lower()
+        cache_key = (slug, storage_gb, normalized_condition)
+        cached = _live_quote_cache.get(cache_key)
+        if cached and monotonic() - cached[0] < LIVE_QUOTE_CACHE_SECONDS:
+            return dict(cached[1])
+
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            follow_redirects=True,
+            headers=HEADERS,
+        ) as client:
+            response = await client.get(f"{PRODUCT_URL}{slug}/")
+            response.raise_for_status()
+
+        model = _parse_model_page(response.text, slug)
+        if not model:
+            return None
+        rows = _compute_all_prices(model["model_name"], model["calc"], slug)
+        quote = next(
+            (
+                row for row in rows
+                if row["storage_gb"] == storage_gb
+                and row["condition"].lower() == normalized_condition
+            ),
+            None,
+        )
+        if quote:
+            _live_quote_cache[cache_key] = (monotonic(), dict(quote))
+        return quote
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

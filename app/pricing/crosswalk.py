@@ -415,9 +415,10 @@ def renewed_condition(a: FormAnswers) -> Optional[str]:
     visual = _RENEWED_VISUAL[_worst(a.screen_surface, a.sides_surface, a.back_surface)]
 
     # Deras bästa skick kräver minst 85 % batterihälsa; övriga visuella skick
-    # kräver minst 80 %. CashMyPhones batteriflagga betyder under topptröskeln.
+    # kräver minst 80 %. Under 80 % finns inget giltigt visuellt skick. Det ska
+    # inte mappas till "Trasigt skick", som är avsett för faktisk fysisk skada.
     if a.battery_health_percent is not None and a.battery_health_percent < 80:
-        return "broken"
+        return None
     if a.is_battery_low and visual == "very_good":
         return "used"
 

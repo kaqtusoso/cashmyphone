@@ -24,25 +24,54 @@ router = APIRouter(prefix="/api", tags=["prices"])
 logger = logging.getLogger(__name__)
 
 
-async def _refresh_telestore_quote(
+async def _refresh_official_quote(
     quote: "RetailerQuote",
+    model: str,
     storage_gb: int,
 ) -> Optional["RetailerQuote"]:
-    """Verifiera Telestore live och dölj budet om det inte kan bekräftas."""
-    if quote.retailer.lower() != "telestore":
+    """Verifiera publika livepriser och dölj bud som inte kan bekräftas."""
+    retailer = quote.retailer.lower()
+    if retailer not in {"telestore", "happyphone", "fixmyphone", "renewed"}:
         return quote
-    if not quote.url:
+    if retailer != "renewed" and not quote.url:
         return None
     try:
-        from ..scrapers.telestore import TelestoreScraper
+        if retailer == "telestore":
+            from ..scrapers.telestore import TelestoreScraper
 
-        live = await asyncio.wait_for(
-            TelestoreScraper().fetch_live_quote(
+            live_call = TelestoreScraper().fetch_live_quote(
                 quote.url,
                 storage_gb,
                 quote.condition_key,
-            ),
-            timeout=5,
+            )
+        elif retailer == "happyphone":
+            from ..scrapers.happyphone import HappyPhoneScraper
+
+            live_call = HappyPhoneScraper().fetch_live_quote(
+                quote.url,
+                storage_gb,
+                quote.condition_key,
+            )
+        elif retailer == "fixmyphone":
+            from ..scrapers.fixmyphone import FixMyPhoneScraper
+
+            live_call = FixMyPhoneScraper().fetch_live_quote(
+                quote.url,
+                storage_gb,
+                quote.condition_key,
+            )
+        else:
+            from ..scrapers.renewed import RenewedScraper
+
+            live_call = RenewedScraper().fetch_live_quote(
+                model,
+                storage_gb,
+                quote.condition_key,
+            )
+
+        live = await asyncio.wait_for(
+            live_call,
+            timeout=8,
         )
         if live and int(live["price_sek"]) > 0:
             return RetailerQuote(
@@ -53,7 +82,7 @@ async def _refresh_telestore_quote(
                 scraped_at=datetime.now(UTC).replace(tzinfo=None),
             )
     except Exception as exc:
-        logger.warning("Telestore live-verifiering misslyckades: %s", exc)
+        logger.warning("%s live-verifiering misslyckades: %s", retailer, exc)
     return None
 
 
@@ -336,10 +365,11 @@ async def get_quote(
             scraped_at=row.scraped_at,
         ))
 
-    # Telestore kan ändra pris mellan de schemalagda fullscraperna. Kontrollera
-    # därför deras valda rad direkt i officiella API:t innan budet visas.
+    # Återförsäljare kan ändra pris mellan de schemalagda fullscraperna.
+    # Kontrollera de källor som har ett stabilt publikt live-API/data-calc
+    # direkt innan budet visas.
     refreshed_quotes = await asyncio.gather(*(
-        _refresh_telestore_quote(quote, req.storage_gb)
+        _refresh_official_quote(quote, model_normalized, req.storage_gb)
         for quote in quotes
     ))
     quotes = [quote for quote in refreshed_quotes if quote is not None]

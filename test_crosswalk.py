@@ -15,7 +15,7 @@ from app.pricing.crosswalk import (
 from app.routers.prices import (
     RetailerQuote,
     _phonehero_ignores_battery,
-    _refresh_telestore_quote,
+    _refresh_official_quote,
 )
 from app.scrapers.telestore import _condition_selection
 
@@ -100,13 +100,55 @@ class CrosswalkRegressionTests(unittest.TestCase):
             phonehero_conditions(answers, model="iPhone 13"),
         )
 
-    def test_renewed_rejects_visual_tiers_below_80_percent_battery(self):
+    def test_renewed_has_no_offer_below_80_percent_without_physical_damage(self):
         answers = FormAnswers(
             "GOOD", "LIKE_NEW", "LIKE_NEW",
             is_battery_low=True,
             battery_health_percent=79,
         )
+        self.assertIsNone(renewed_condition(answers))
+
+    def test_renewed_keeps_broken_tier_for_actual_damage_below_80_percent(self):
+        answers = FormAnswers(
+            "LIKE_NEW", "LIKE_NEW", "MODERATE",
+            is_back_cracked=True,
+            is_frame_broken=True,
+            is_battery_low=True,
+            battery_health_percent=79,
+        )
         self.assertEqual(renewed_condition(answers), "broken")
+
+    def test_renewed_battery_boundaries_follow_official_terms(self):
+        base = ("ALMOST_NEW", "ALMOST_NEW", "ALMOST_NEW")
+        self.assertIsNone(renewed_condition(FormAnswers(
+            *base, is_battery_low=True, battery_health_percent=79
+        )))
+        self.assertEqual(renewed_condition(FormAnswers(
+            *base, is_battery_low=True, battery_health_percent=80
+        )), "used")
+        self.assertEqual(renewed_condition(FormAnswers(
+            *base, is_battery_low=True, battery_health_percent=84
+        )), "used")
+        self.assertEqual(renewed_condition(FormAnswers(
+            *base, is_battery_low=False, battery_health_percent=85
+        )), "very_good")
+
+    def test_happyphone_battery_boundary_uses_official_deduction_flag(self):
+        below = FormAnswers(
+            "ALMOST_NEW", "ALMOST_NEW", "ALMOST_NEW",
+            is_battery_low=True,
+            battery_health_percent=79,
+        )
+        accepted = FormAnswers(
+            "ALMOST_NEW", "ALMOST_NEW", "ALMOST_NEW",
+            is_battery_low=False,
+            battery_health_percent=85,
+        )
+        self.assertEqual(
+            fixmyphone_condition(below),
+            "very_good:no_battery",
+        )
+        self.assertEqual(fixmyphone_condition(accepted), "very_good")
 
     def test_face_id_uses_each_retailers_specific_category(self):
         answers = FormAnswers(
@@ -188,7 +230,7 @@ class CrosswalkRegressionTests(unittest.TestCase):
         self.assertIn("s=n|b=n|d=no|c=no|bt=low", phonehero_conditions(answers))
 
 
-class TelestoreLiveQuoteTests(unittest.IsolatedAsyncioTestCase):
+class OfficialLiveQuoteTests(unittest.IsolatedAsyncioTestCase):
     async def test_live_price_replaces_stale_database_price(self):
         stale = RetailerQuote(
             retailer="telestore",
@@ -201,7 +243,7 @@ class TelestoreLiveQuoteTests(unittest.IsolatedAsyncioTestCase):
             "app.scrapers.telestore.TelestoreScraper.fetch_live_quote",
             new=AsyncMock(return_value={"price_sek": 8500}),
         ):
-            refreshed = await _refresh_telestore_quote(stale, 256)
+            refreshed = await _refresh_official_quote(stale, "iPhone 16 Pro", 256)
 
         self.assertEqual(refreshed.price_sek, 8500)
 
@@ -217,9 +259,45 @@ class TelestoreLiveQuoteTests(unittest.IsolatedAsyncioTestCase):
             "app.scrapers.telestore.TelestoreScraper.fetch_live_quote",
             new=AsyncMock(side_effect=TimeoutError),
         ):
-            refreshed = await _refresh_telestore_quote(stale, 128)
+            refreshed = await _refresh_official_quote(stale, "iPhone 13", 128)
 
         self.assertIsNone(refreshed)
+
+    async def test_happyphone_live_price_replaces_stale_database_price(self):
+        stale = RetailerQuote(
+            retailer="happyphone",
+            condition_key="very_good:no_battery",
+            price_sek=1330,
+            url="https://happyphone.se/product/iphone-13-pro-max-2",
+            scraped_at=datetime(2026, 7, 22, 16, 1),
+        )
+        with patch(
+            "app.scrapers.happyphone.HappyPhoneScraper.fetch_live_quote",
+            new=AsyncMock(return_value={"price_sek": 913}),
+        ):
+            refreshed = await _refresh_official_quote(
+                stale, "iPhone 13 Pro Max", 128
+            )
+
+        self.assertEqual(refreshed.price_sek, 913)
+
+    async def test_renewed_live_price_replaces_stale_database_price(self):
+        stale = RetailerQuote(
+            retailer="renewed",
+            condition_key="used",
+            price_sek=2100,
+            url="https://renewed.se/pages/salj-din-iphone",
+            scraped_at=datetime(2026, 7, 22, 16, 1),
+        )
+        with patch(
+            "app.scrapers.renewed.RenewedScraper.fetch_live_quote",
+            new=AsyncMock(return_value={"price_sek": 2180}),
+        ):
+            refreshed = await _refresh_official_quote(
+                stale, "iPhone 13 Pro Max", 128
+            )
+
+        self.assertEqual(refreshed.price_sek, 2180)
 
 
 if __name__ == "__main__":
