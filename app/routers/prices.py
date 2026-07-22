@@ -155,12 +155,15 @@ class QuoteRequest(BaseModel):
     """Formulärsvar från CashMyPhone — en iPhone utvärderas."""
     model: str
     storage_gb: int
+    battery_health_percent: Optional[int] = None
     screen_surface:   str          # LIKE_NEW | ALMOST_NEW | GOOD | MODERATE
     sides_surface:    str
     back_surface:     str
     is_broken:        bool = False
     is_screen_broken: bool = False
     is_glass_broken:  bool = False
+    is_frame_broken:  bool = False
+    is_back_camera_broken: bool = False
     is_battery_low:   bool = False
     is_water_damaged: bool = False
 
@@ -204,9 +207,12 @@ async def get_quote(
         screen_surface=req.screen_surface.upper(),
         sides_surface=req.sides_surface.upper(),
         back_surface=req.back_surface.upper(),
+        battery_health_percent=req.battery_health_percent,
         is_broken=req.is_broken,
         is_screen_broken=req.is_screen_broken,
         is_glass_broken=req.is_glass_broken,
+        is_frame_broken=req.is_frame_broken,
+        is_back_camera_broken=req.is_back_camera_broken,
         is_battery_low=req.is_battery_low,
         is_water_damaged=req.is_water_damaged,
     )

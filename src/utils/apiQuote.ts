@@ -110,23 +110,17 @@ const worstSurface = (a: string, b: string) => (SURFACE_RANK[a] >= SURFACE_RANK[
 const wearToSurface = (w: WearLevelWithCrack | WearLevel | null): string => {
   switch (w) {
     case "none":
-      return "LIKE_NEW";
     case "minimal":
-      return "ALMOST_NEW";
+      return "LIKE_NEW";
     case "some":
-      return "GOOD";
+      return "ALMOST_NEW";
     case "visible":
+      return "GOOD";
     case "cracked":
       return "MODERATE";
     default:
       return "LIKE_NEW";
   }
-};
-
-const glassToSurface = (g: ScreenGlass | null): string => {
-  if (g === "chipped") return "MODERATE";
-  if (g === "scratched") return "GOOD";
-  return "LIKE_NEW";
 };
 
 // ─── Lagring → GB ────────────────────────────────────────────────────────────
@@ -209,7 +203,6 @@ const buildPayload = (model: string, storage: string, a: ConditionAnswers) => {
     f.network === false ||
     f.faceId === false ||
     f.selfieCamera === false ||
-    f.rearCamera === false ||
     f.speaker === false ||
     f.chargingOrButtons === false ||
     f.other === false;
@@ -217,9 +210,11 @@ const buildPayload = (model: string, storage: string, a: ConditionAnswers) => {
   const isWaterDamaged = f.bentOrWaterDamaged === true || a.critical?.bent === true || a.critical?.waterDamaged === true;
   const isScreenBroken = !sf.allWorks && (sf.brightSpots || sf.deadPixels || sf.linesOrBurnIn || sf.touchIssue);
   const isGlassBroken = a.screenGlass === "chipped" || a.screenGlass === "scratched";
+  const isFrameBroken = a.sidesWear === "cracked" || a.backWear === "cracked";
+  const isBackCameraBroken = f.rearCamera === false;
   const isBatteryLow = a.batteryHealth !== null && a.batteryHealth < 85;
 
-  const screenSurface = worstSurface(wearToSurface(a.screenWear), glassToSurface(a.screenGlass));
+  const screenSurface = wearToSurface(a.screenWear);
 
   return {
     model,
@@ -231,6 +226,8 @@ const buildPayload = (model: string, storage: string, a: ConditionAnswers) => {
     is_broken: isBroken,
     is_screen_broken: isScreenBroken,
     is_glass_broken: isGlassBroken,
+    is_frame_broken: isFrameBroken,
+    is_back_camera_broken: isBackCameraBroken,
     is_battery_low: isBatteryLow,
     is_water_damaged: isWaterDamaged,
   };

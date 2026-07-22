@@ -8,15 +8,17 @@ egna skick-system.
 ─── Indata (FormAnswers) ──────────────────────────────────────────────────────
   screen_surface   – skärmens visuella slitage: LIKE_NEW | ALMOST_NEW | GOOD | MODERATE
   sides_surface    – sidornas visuella slitage: samma skala
-  back_surface     – baksidans skick: MODERATE = sprucken/trasig
+  back_surface     – baksidans visuella skick: MODERATE = sprucken/trasig i äldre klienter
   is_broken        – underkänd funktionskoll     (Swappie: inget bud)
   is_screen_broken – skärm fungerar ej           (Swappie: BS)
-  is_glass_broken  – skärmglas sprucket/repor    (Swappie: BG)
+  is_glass_broken  – skärmglas sprucket/repor    (Swappie: B)
+  is_frame_broken  – sprucken/skadad sida/baksida (Swappie: BF)
+  is_back_camera_broken – bakre kamera trasig    (Swappie: BBC)
   is_battery_low   – batteri under tröskeln      (Swappie: BAT, tröskel 86%)
   is_water_damaged – böjd, vatten, Face/Touch ID (Swappie: → MODERATE visuellt)
 
 ─── Condition-nyckelformat per återförsäljare ────────────────────────────────
-  Swappie:     None om funktionskollen underkänns, annars "LIKE_NEW" / "GOOD:BAT,BG,BS"
+  Swappie:     None om funktionskollen underkänns, annars "LIKE_NEW" / "GOOD:B,BAT,BBC,BF,BS"
   FixMyPhone:  "like_new"  /  "good:no_battery:no_display"
   HappyPhone:  identisk med FixMyPhone
   Telestore:   "nyskick"   /  "bra:bat:sidor"  /  "water_damaged"
@@ -52,8 +54,11 @@ class FormAnswers:
     back_surface:     str          # MODERATE = sprucken/trasig
     is_broken:        bool = False  # minst ett fel i den samlade funktionskollen
     is_screen_broken: bool = False  # skärmfunktion trasig (fläckar/linjer)
-    is_glass_broken:  bool = False  # skärmglas sprucket/allvarliga repor
+    is_glass_broken:  bool = False  # skärmglas sprucket/flisigt/allvarligt repat
+    is_frame_broken:  bool = False  # skadade/spruckna sidor eller baksida
+    is_back_camera_broken: bool = False  # bakre kamera fungerar inte
     is_battery_low:   bool = False  # batteri under tröskeln
+    battery_health_percent: Optional[int] = None
     is_water_damaged: bool = False  # böjd, vatten eller Face/Touch ID trasigt
 
 
@@ -61,9 +66,18 @@ class FormAnswers:
 
 _SWAPPIE_FUNC: Dict[str, str] = {
     "is_battery_low":   "BAT",
-    "is_glass_broken":  "BG",
+    "is_glass_broken":  "B",
     "is_screen_broken": "BS",
+    "is_frame_broken":  "BF",
+    "is_back_camera_broken": "BBC",
 }
+
+
+def _battery_low_for_swappie(a: FormAnswers) -> bool:
+    """Swappies liveflöde använder 86 % som gräns (85 % ger BAT)."""
+    if a.battery_health_percent is not None:
+        return a.battery_health_percent < 86
+    return a.is_battery_low
 
 def swappie_condition(a: FormAnswers) -> Optional[str]:
     # Swappies svenska säljflöde visar "Ej kvalificerad" när någon del av
@@ -71,14 +85,31 @@ def swappie_condition(a: FormAnswers) -> Optional[str]:
     if a.is_broken:
         return None
 
-    visual = _worst(a.screen_surface, a.sides_surface, a.back_surface)
+    # Swappies "Skadad" för sida/baksida är BROKEN_FRAME, inte en visuell
+    # MODERATE-nivå. Äldre klienter skickar samtidigt MODERATE för den skadade
+    # ytan, så cappa just dessa ytor när den explicita flaggan finns.
+    sides_visual = (
+        "LIKE_NEW"
+        if a.is_frame_broken and a.sides_surface == "MODERATE"
+        else a.sides_surface
+    )
+    back_visual = (
+        "LIKE_NEW"
+        if a.is_frame_broken and a.back_surface == "MODERATE"
+        else a.back_surface
+    )
+    visual = _worst(a.screen_surface, sides_visual, back_visual)
     if a.is_water_damaged:
         visual = "MODERATE"
 
-    functional = sorted(
+    functional = []
+    if _battery_low_for_swappie(a):
+        functional.append(_SWAPPIE_FUNC["is_battery_low"])
+    functional.extend(
         abbrev for flag, abbrev in _SWAPPIE_FUNC.items()
-        if getattr(a, flag)
+        if flag != "is_battery_low" and getattr(a, flag)
     )
+    functional.sort()
     return f"{visual}:{','.join(functional)}" if functional else visual
 
 

@@ -7,22 +7,23 @@ direkta API-anrop utan att kräva manuell webbsession. Om det slutar ge resultat
 faller scrapern tillbaka till Playwright och fetch inne i browser-context.
 
 Swappie exponerar ett öppet API som returnerar inköpspriser för alla kombinationer
-av visuellt skick och funktionella flaggor. API:t innehåller även BROKEN-rader,
-trots att det svenska säljflödet stoppar telefoner som inte klarar
-funktionskollen. De raderna filtreras därför bort innan import.
+av visuellt skick och funktionella flaggor. BROKEN betyder skadat skärmglas;
+underkänd funktionskoll stoppas av Televeras crosswalk och har ingen prisflagga.
 
 ─── Condition-nyckelformat (lagras i condition-kolumnen) ─────────────────────
 Utan funktionella fel:  "LIKE_NEW"
-Med tillåtna skickfel:  "LIKE_NEW:BAT,BG,BS"   (alfabetisk ordning)
+Med tillåtna skickfel:  "LIKE_NEW:B,BAT,BBC,BF,BS" (alfabetisk ordning)
 
 Funktionskoder:
-  B   = BROKEN        – underkänd funktionskoll (filtreras alltid bort)
+  B   = BROKEN        – sprucket/flisigt/allvarligt repat skärmglas
   BAT = BATTERY_ISSUE – batterihälsa under 86%
-  BG  = BROKEN_GLASS  – flisor eller kraftiga repor på skärmglas
+  BBC = BROKEN_BACK_CAMERA – bakre kamera fungerar inte
+  BF  = BROKEN_FRAME  – skadad/sprucken sida eller baksida
   BS  = BROKEN_SCREEN – skärmen fungerar ej (fläckar, pixlar, linjer)
 
 ─── visual_condition — mappning från Swappies formulär ───────────────────────
-visual_condition bestäms av det SÄMSTA svaret bland tre ytor:
+visual_condition bestäms av det SÄMSTA visuella slitaget bland tre ytor.
+"Skadad" sida/baksida hanteras separat som BROKEN_FRAME:
   skärmens skick (steg 7) + sidornas skick (steg 8) + baksidans skick (steg 9)
 
   Formuläralternativ          → API visual_condition
@@ -31,7 +32,7 @@ visual_condition bestäms av det SÄMSTA svaret bland tre ytor:
   "Minimalt slitage"          → LIKE_NEW
   "Vissa tecken på slitage"   → ALMOST_NEW
   "Synligt slitage"           → GOOD
-  "Sprucken eller trasig"     → MODERATE
+  "Skadad/sprucken sida/baksida" → BROKEN_FRAME (inte MODERATE)
 
   SEALED_BOX förekommer i API:et men är inte ett formuläralternativ
   (avser fabriksförseglat skick).
@@ -59,6 +60,7 @@ import asyncio
 import json
 import logging
 import re
+from collections import defaultdict
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -82,11 +84,18 @@ ALL_STORAGES = ["64GB", "128GB", "256GB", "512GB", "1TB", "2TB"]
 FUNC_ABBREV: Dict[str, str] = {
     "BROKEN":        "B",
     "BATTERY_ISSUE": "BAT",
-    "BROKEN_GLASS":  "BG",
+    "BROKEN_BACK_CAMERA": "BBC",
+    "BROKEN_FRAME":  "BF",
     "BROKEN_SCREEN": "BS",
 }
 
-INELIGIBLE_FUNCTIONAL_CONDITIONS = {"BROKEN"}
+KNOWN_FUNCTIONAL_CONDITIONS = frozenset(FUNC_ABBREV)
+KNOWN_VISUAL_CONDITIONS = frozenset({
+    "SEALED_BOX", "LIKE_NEW", "ALMOST_NEW", "GOOD", "MODERATE",
+})
+EXPECTED_CONDITIONS_PER_DEVICE = len(KNOWN_VISUAL_CONDITIONS) * (
+    2 ** len(KNOWN_FUNCTIONAL_CONDITIONS)
+)
 
 # Modellerna som är valbara i Swappies svenska säljflöde. Pris-API:t kan
 # fortfarande returnera priser för utgångna modeller, så modellväljaren är
@@ -117,7 +126,7 @@ HEADERS = {
 }
 
 
-def _condition_key(visual: str, functional: List[str]) -> str:
+def _condition_key(visual: str, functional: List[str]) -> Optional[str]:
     """
     Bygg en kompakt, sorterbar condition-nyckel.
 
@@ -125,8 +134,60 @@ def _condition_key(visual: str, functional: List[str]) -> str:
       ("LIKE_NEW", [])                              → "LIKE_NEW"
       ("GOOD", ["BROKEN_SCREEN", "BATTERY_ISSUE"])  → "GOOD:BAT,BS"
     """
-    abbrevs = sorted(FUNC_ABBREV[f] for f in functional if f in FUNC_ABBREV)
+    if visual not in KNOWN_VISUAL_CONDITIONS:
+        return None
+    if any(flag not in KNOWN_FUNCTIONAL_CONDITIONS for flag in functional):
+        return None
+    abbrevs = sorted(FUNC_ABBREV[f] for f in functional)
     return f"{visual}:{','.join(abbrevs)}" if abbrevs else visual
+
+
+def _validate_api_schema(results: List[Dict]) -> None:
+    """Fail closed om Swappie ändrar sin villkorsmatris.
+
+    Tidigare ignorerades okända flaggor tyst, vilket kunde slå ihop en skadad
+    telefon med en dyrare oskadad rad. En scraperkörning får nu hellre stoppas
+    än publicera ett felaktigt bud.
+    """
+    visuals = {r.get("visual_condition") for r in results if r.get("visual_condition")}
+    flags = {
+        flag
+        for row in results
+        for flag in (row.get("functional_condition") or [])
+    }
+    unknown_visuals = visuals - KNOWN_VISUAL_CONDITIONS
+    unknown_flags = flags - KNOWN_FUNCTIONAL_CONDITIONS
+    missing_flags = KNOWN_FUNCTIONAL_CONDITIONS - flags
+    missing_visuals = KNOWN_VISUAL_CONDITIONS - visuals
+
+    combinations_by_device = defaultdict(set)
+    for row in results:
+        model_name = row.get("model_name")
+        visual = row.get("visual_condition")
+        functional = tuple(sorted(row.get("functional_condition") or []))
+        if model_name and visual:
+            combinations_by_device[model_name].add((visual, functional))
+    incomplete_devices = {
+        model_name: len(combinations)
+        for model_name, combinations in combinations_by_device.items()
+        if len(combinations) != EXPECTED_CONDITIONS_PER_DEVICE
+    }
+
+    if (
+        unknown_visuals
+        or unknown_flags
+        or missing_flags
+        or missing_visuals
+        or incomplete_devices
+    ):
+        raise RuntimeError(
+            "Swappie API-schema har ändrats: "
+            f"okända visuella={sorted(unknown_visuals)}, "
+            f"okända flaggor={sorted(unknown_flags)}, "
+            f"saknade visuella={sorted(missing_visuals)}, "
+            f"saknade flaggor={sorted(missing_flags)}, "
+            f"ofullständiga enheter={incomplete_devices}"
+        )
 
 
 def _parse_storage_gb(model_name: str) -> Optional[int]:
@@ -265,8 +326,6 @@ def _parse_results(results: List[Dict]) -> List[Dict]:
             continue
 
         functional: List[str] = r.get("functional_condition") or []
-        if INELIGIBLE_FUNCTIONAL_CONDITIONS.intersection(functional):
-            continue
 
         raw_model = r.get("model_name", "")
         storage_gb = _parse_storage_gb(raw_model)
@@ -284,6 +343,8 @@ def _parse_results(results: List[Dict]) -> List[Dict]:
             continue
 
         condition = _condition_key(visual, functional)
+        if condition is None:
+            continue
 
         prices.append({
             "model":      clean_model,
@@ -307,6 +368,9 @@ class SwappieScraper(BaseScraper):
         if not raw_results:
             logger.warning("Swappie: curl-cffi gav inga resultat – provar Playwright fallback")
             raw_results = await _fetch_all_models_playwright()
+
+        if raw_results:
+            _validate_api_schema(raw_results)
 
         prices = _parse_results(raw_results)
         found_models = len({p["model"] for p in prices})
