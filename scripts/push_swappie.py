@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hämta Swappies livepriser och importera dem i Railway.
 
-Pushern återanvänder alltid den ordinarie scrapern, schemavalideringen och
-normaliseringen. Därmed kan den manuella produktionsvägen inte driva ifrån den
+Pushern återanvänder alltid den ordinarie scrapern och schemavalideringen.
+Därmed kan den manuella produktionsvägen inte driva ifrån den
 schemalagda körningen eller tyst ignorera nya Swappie-flaggor.
 """
 import asyncio
@@ -15,7 +15,6 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.pricing.normalization import normalize_price_records
 from app.scrapers.swappie import SwappieScraper
 
 
@@ -31,7 +30,7 @@ API_KEY = "banankaka998877665544332211"
 
 async def main() -> None:
     logger.info("Startar Swappie-import med delad scraperlogik...")
-    prices = normalize_price_records(await SwappieScraper().fetch_prices())
+    prices = await SwappieScraper().fetch_prices()
     if not prices:
         raise RuntimeError("Swappie returnerade inga normaliserade priser")
 
