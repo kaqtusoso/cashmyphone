@@ -110,12 +110,12 @@ const worstSurface = (a: string, b: string) => (SURFACE_RANK[a] >= SURFACE_RANK[
 const wearToSurface = (w: WearLevelWithCrack | WearLevel | null): string => {
   switch (w) {
     case "none":
-    case "minimal":
       return "LIKE_NEW";
-    case "some":
+    case "minimal":
       return "ALMOST_NEW";
-    case "visible":
+    case "some":
       return "GOOD";
+    case "visible":
     case "cracked":
       return "MODERATE";
     default:
