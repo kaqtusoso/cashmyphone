@@ -182,7 +182,7 @@ const CheckoutContent = ({
   const shippingFeeSek = selectedShippingOption?.feeSek ?? 0;
   const showErrors = submitCount > 0;
 
-  const stepTitles = ["Dina uppgifter", "Frakt & betalning", "Bekräfta din beställning"];
+  const stepTitles = ["Nästa steg", "Frakt & betalning", "Bekräfta din beställning"];
 
   const nextStep = async () => {
     if (currentStep === 1) {

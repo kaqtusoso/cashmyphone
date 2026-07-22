@@ -4,7 +4,7 @@
  * Anropar Televera backend (/api/quote) och mappar svaret till
  * CompanyOffer[] som resten av appen förväntar sig.
  */
-import { ConditionAnswers, WearLevel, WearLevelWithCrack, ScreenGlass } from "@/types/condition";
+import { ConditionAnswers, WearLevel, WearLevelWithCrack } from "@/types/condition";
 import { CompanyOffer } from "@/types/offers";
 import { API_URL } from "@/utils/apiClient";
 
