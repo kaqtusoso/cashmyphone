@@ -198,20 +198,26 @@ const buildPayload = (model: string, storage: string, a: ConditionAnswers) => {
   const f = a.functional;
   const sf = a.screenFunction;
 
+  const isPowerBroken = f.powersOn === false;
+  const isNetworkBroken = f.network === false;
+  const isFaceIdBroken = f.faceId === false;
+  const isSelfieCameraBroken = f.selfieCamera === false;
+  const isBackCameraBroken = f.rearCamera === false;
+  const isSpeakerBroken = f.speaker === false;
+  const isChargingOrButtonsBroken = f.chargingOrButtons === false;
+  const isOtherBroken = f.other === false;
   const isBroken =
-    f.powersOn === false ||
-    f.network === false ||
-    f.faceId === false ||
-    f.selfieCamera === false ||
-    f.speaker === false ||
-    f.chargingOrButtons === false ||
-    f.other === false;
+    isPowerBroken || isNetworkBroken || isFaceIdBroken ||
+    isSelfieCameraBroken || isSpeakerBroken ||
+    isChargingOrButtonsBroken || isOtherBroken;
 
   const isWaterDamaged = f.bentOrWaterDamaged === true || a.critical?.bent === true || a.critical?.waterDamaged === true;
   const isScreenBroken = !sf.allWorks && (sf.brightSpots || sf.deadPixels || sf.linesOrBurnIn || sf.touchIssue);
-  const isGlassBroken = a.screenGlass === "chipped" || a.screenGlass === "scratched";
-  const isFrameBroken = a.sidesWear === "cracked" || a.backWear === "cracked";
-  const isBackCameraBroken = f.rearCamera === false;
+  const isGlassChipped = a.screenGlass === "chipped";
+  const isGlassScratched = a.screenGlass === "scratched";
+  const isSidesCracked = a.sidesWear === "cracked";
+  const isBackCracked = a.backWear === "cracked";
+  const isFrameBroken = isSidesCracked || isBackCracked;
   const isBatteryLow = a.batteryHealth !== null && a.batteryHealth < 85;
 
   const screenSurface = wearToSurface(a.screenWear);
@@ -224,9 +230,21 @@ const buildPayload = (model: string, storage: string, a: ConditionAnswers) => {
     sides_surface: wearToSurface(a.sidesWear),
     back_surface: wearToSurface(a.backWear),
     is_broken: isBroken,
+    is_power_broken: isPowerBroken,
+    is_network_broken: isNetworkBroken,
+    is_face_id_broken: isFaceIdBroken,
+    is_selfie_camera_broken: isSelfieCameraBroken,
+    is_speaker_broken: isSpeakerBroken,
+    is_charging_or_buttons_broken: isChargingOrButtonsBroken,
+    is_other_broken: isOtherBroken,
     is_screen_broken: isScreenBroken,
-    is_glass_broken: isGlassBroken,
+    // Legacyfältet betyder från och med nu faktisk spricka/flisa, inte repor.
+    is_glass_broken: isGlassChipped,
+    is_glass_chipped: isGlassChipped,
+    is_glass_scratched: isGlassScratched,
     is_frame_broken: isFrameBroken,
+    is_sides_cracked: isSidesCracked,
+    is_back_cracked: isBackCracked,
     is_back_camera_broken: isBackCameraBroken,
     is_battery_low: isBatteryLow,
     is_water_damaged: isWaterDamaged,

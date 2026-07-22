@@ -78,6 +78,9 @@ def _lower_bound_price(base_price: int, deduction: int) -> int:
 class FixiphoneScraper(BaseScraper):
     retailer_id = "fixiphone"
     retailer_name = "Fixiphone"
+    min_models = 20
+    min_rows = 1000
+    expected_conditions = frozenset(f"d{deduction}" for deduction in ALL_DEDUCTIONS)
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

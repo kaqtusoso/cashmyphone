@@ -148,6 +148,15 @@ def _extract_models(html: str) -> List[Dict[str, Any]]:
 class FixPhoneProScraper(BaseScraper):
     retailer_id = "fixphonepro"
     retailer_name = "FixPhonePro"
+    min_models = 20
+    min_rows = 5000
+    expected_conditions = frozenset(
+        _condition_key(screen, body, defect, functional, battery)
+        for screen, body, defect, functional, battery in itertools.product(
+            SCREEN_FACTORS, BODY_FACTORS, DEFECT_FACTORS,
+            FUNCTIONAL_FACTORS, BATTERY_FACTORS,
+        )
+    )
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

@@ -70,6 +70,9 @@ def _model_name(name: str) -> str:
 class RenewedScraper(BaseScraper):
     retailer_id = "renewed"
     retailer_name = "reNewed"
+    min_models = 20
+    min_rows = 200
+    expected_conditions = frozenset(CONDITION_KEYS.values())
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

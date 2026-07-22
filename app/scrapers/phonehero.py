@@ -25,7 +25,7 @@ import re
 import asyncio
 import unicodedata
 from itertools import product
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterable, Mapping
 from bs4 import BeautifulSoup
 from .base import BaseScraper
 from ..config import settings
@@ -93,7 +93,7 @@ def _answer_key(label: str) -> str:
         return "no"
     if "face-id" in text or "face id" in text:
         return "fid"
-    if "fingeravtryck" in text:
+    if "fingeravtryck" in text or "touch id" in text or "touch-id" in text:
         return "fp"
     if "ljudet" in text:
         return "snd"
@@ -164,6 +164,36 @@ def _round_display_price(price: int) -> int:
 class PhoneHeroScraper(BaseScraper):
     retailer_id = "phonehero"
     retailer_name = "PhoneHero"
+    min_models = 20
+    min_rows = 5000
+    expected_condition_count = 20
+
+    _allowed_answers = {
+        "s": {"n", "ns", "ms", "sg", "lcd"},
+        "b": {"n", "ns", "ms", "sp"},
+        "dev": {"n", "ns", "ms", "sf", "sb", "sfb"},
+        "d": {"no", "fid", "fp", "snd", "off", "cam", "oth"},
+        "c": {"no", "yok", "ybad"},
+        "bt": {"ok", "low"},
+    }
+
+    async def validate_prices(
+        self,
+        prices: Iterable[Mapping[str, Any]],
+        db,
+    ) -> List[Dict[str, Any]]:
+        rows = await super().validate_prices(prices, db)
+        for row in rows:
+            condition = str(row["condition"])
+            for part in condition.split("|"):
+                if "=" not in part:
+                    raise RuntimeError(f"PhoneHero: ogiltig condition-nyckel {condition}")
+                question, answer = part.split("=", 1)
+                if question not in self._allowed_answers or answer not in self._allowed_answers[question]:
+                    raise RuntimeError(
+                        f"PhoneHero: okänt formulärsvar {question}={answer}; import stoppad"
+                    )
+        return rows
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

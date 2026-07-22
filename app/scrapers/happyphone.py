@@ -287,6 +287,18 @@ def _compute_all_prices(model_name: str, calc: Dict, slug: str) -> List[Dict]:
 class HappyPhoneScraper(BaseScraper):
     retailer_id   = "happyphone"
     retailer_name = "HappyPhone"
+    min_models = 20
+    min_rows = 1000
+    expected_conditions = frozenset(
+        {
+            _condition_key(condition, no_working, no_display, no_back, no_battery)
+            for condition in CONDITIONS
+            for no_working, no_display, no_back, no_battery in iterproduct(
+                (False, True), repeat=4
+            )
+        }
+        | {"water_damaged"}
+    )
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(

@@ -10,7 +10,10 @@ export interface FunctionalChecks {
   network: boolean | null;
   faceId: boolean | null;
   selfieCamera: boolean | null;
+  rearCamera: boolean | null;
   speaker: boolean | null;
+  chargingOrButtons: boolean | null;
+  other: boolean | null;
   bentOrWaterDamaged: boolean | null; // true = ja (dåligt), false = nej (bra)
 }
 
@@ -18,6 +21,7 @@ export interface ScreenFunctionChecks {
   brightSpots: boolean;
   deadPixels: boolean;
   linesOrBurnIn: boolean;
+  touchIssue: boolean;
   allWorks: boolean;
 }
 
@@ -37,7 +41,10 @@ export const initialFunctional: FunctionalChecks = {
   network: null,
   faceId: null,
   selfieCamera: null,
+  rearCamera: null,
   speaker: null,
+  chargingOrButtons: null,
+  other: null,
   bentOrWaterDamaged: null,
 };
 
@@ -45,6 +52,7 @@ export const initialScreenFunction: ScreenFunctionChecks = {
   brightSpots: false,
   deadPixels: false,
   linesOrBurnIn: false,
+  touchIssue: false,
   allWorks: false,
 };
 

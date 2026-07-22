@@ -160,9 +160,20 @@ class QuoteRequest(BaseModel):
     sides_surface:    str
     back_surface:     str
     is_broken:        bool = False
+    is_power_broken: bool = False
+    is_network_broken: bool = False
+    is_face_id_broken: bool = False
+    is_selfie_camera_broken: bool = False
+    is_speaker_broken: bool = False
+    is_charging_or_buttons_broken: bool = False
+    is_other_broken: bool = False
     is_screen_broken: bool = False
     is_glass_broken:  bool = False
+    is_glass_chipped: bool = False
+    is_glass_scratched: bool = False
     is_frame_broken:  bool = False
+    is_sides_cracked: bool = False
+    is_back_cracked: bool = False
     is_back_camera_broken: bool = False
     is_battery_low:   bool = False
     is_water_damaged: bool = False
@@ -209,16 +220,31 @@ async def get_quote(
         back_surface=req.back_surface.upper(),
         battery_health_percent=req.battery_health_percent,
         is_broken=req.is_broken,
+        is_power_broken=req.is_power_broken,
+        is_network_broken=req.is_network_broken,
+        is_face_id_broken=req.is_face_id_broken,
+        is_selfie_camera_broken=req.is_selfie_camera_broken,
+        is_speaker_broken=req.is_speaker_broken,
+        is_charging_or_buttons_broken=req.is_charging_or_buttons_broken,
+        is_other_broken=req.is_other_broken,
         is_screen_broken=req.is_screen_broken,
         is_glass_broken=req.is_glass_broken,
+        is_glass_chipped=req.is_glass_chipped,
+        is_glass_scratched=req.is_glass_scratched,
         is_frame_broken=req.is_frame_broken,
+        is_sides_cracked=req.is_sides_cracked,
+        is_back_cracked=req.is_back_cracked,
         is_back_camera_broken=req.is_back_camera_broken,
         is_battery_low=req.is_battery_low,
         is_water_damaged=req.is_water_damaged,
     )
     conditions = all_conditions(answers)  # {retailer: condition_key | None}
     if _phonehero_ignores_battery(model_normalized):
-        conditions["phonehero"] = phonehero_conditions(answers, ignore_battery=True)
+        conditions["phonehero"] = phonehero_conditions(
+            answers, model=model_normalized, ignore_battery=True
+        )
+    else:
+        conditions["phonehero"] = phonehero_conditions(answers, model=model_normalized)
 
     # 3. Hämta det bästa (högsta) priset per återförsäljare i ett enda DB-anrop
     #    Bygg OR-filter: (retailer='swappie' AND condition='…') OR …
@@ -236,6 +262,7 @@ async def get_quote(
                 func.lower(BuybackPrice.model) == model_normalized.lower(),
                 BuybackPrice.storage_gb == req.storage_gb,
                 BuybackPrice.is_active == True,
+                BuybackPrice.price_sek > 0,
             )
         )
 
@@ -414,11 +441,20 @@ async def import_prices(
     if not prices:
         raise HTTPException(status_code=400, detail="Inga giltiga priser att importera")
 
+    payload = [price.model_dump() for price in prices]
+    from ..scrapers import SCRAPERS
+    scraper_class = SCRAPERS.get(retailer.lower())
+    if scraper_class is not None:
+        try:
+            payload = await scraper_class().validate_prices(payload, db)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     now = datetime.utcnow()
     snapshot = await replace_current_buyback_prices(
         db,
         retailer=retailer,
-        prices=(p.model_dump() for p in prices),
+        prices=payload,
         captured_at=now,
         source="import",
     )

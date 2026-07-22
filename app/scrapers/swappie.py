@@ -360,6 +360,8 @@ def _parse_results(results: List[Dict]) -> List[Dict]:
 class SwappieScraper(BaseScraper):
     retailer_id = "swappie"
     retailer_name = "Swappie"
+    min_models = 20
+    min_rows = 1000
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         logger.info(f"Swappie: hämtar {len(IPHONE_MODELS)} modeller via curl-cffi...")

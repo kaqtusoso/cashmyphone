@@ -146,6 +146,17 @@ def _parse_model_page(html: str) -> Optional[Dict]:
 class TelestoreScraper(BaseScraper):
     retailer_id = "telestore"
     retailer_name = "Telestore"
+    min_models = 20
+    min_rows = 1000
+    expected_conditions = frozenset(
+        {
+            _condition_key(label, battery, sides)
+            for _, label in SKICK_OPTIONS
+            for battery in (OPT_BATTERI_OK, OPT_BATTERI_LAG)
+            for sides in (OPT_SIDOR_OK, OPT_SIDOR_TRASIG)
+        }
+        | {"water_damaged"}
+    )
 
     async def fetch_prices(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(
