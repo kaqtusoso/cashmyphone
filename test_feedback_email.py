@@ -5,6 +5,7 @@ from unittest.mock import patch
 from app.routers.orders import (
     _build_feedback_email,
     _feedback_candidate_is_due,
+    _feedback_email_html,
     _feedback_email_idempotency_key,
     _send_feedback_email_resend,
 )
@@ -36,6 +37,7 @@ class FakeResponse:
 
 class FakeAsyncClient:
     last_headers = None
+    last_json = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -48,6 +50,7 @@ class FakeAsyncClient:
 
     async def post(self, url, *, headers, json):
         self.__class__.last_headers = headers
+        self.__class__.last_json = json
         return FakeResponse()
 
 
@@ -111,8 +114,26 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
             _feedback_email_idempotency_key(make_row()),
         )
 
+    def test_selected_design_is_rendered_as_email_safe_html(self):
+        with (
+            patch("app.routers.orders.settings.public_base_url", "https://api.example.test"),
+            patch("app.routers.orders.settings.trustpilot_review_url", "https://example.test/review"),
+        ):
+            html = _feedback_email_html(make_row(first_name="Anna & Bo"))
+
+        self.assertIn("Hur gick det, Anna &amp; Bo?", html)
+        self.assertIn("Sätt ett betyg — det tar tre sekunder.", html)
+        self.assertIn("https://api.example.test/mail-assets/televera-logo-full.png", html)
+        self.assertEqual(html.count("aria-label="), 5)
+        for stars in range(1, 6):
+            self.assertIn(f"https://example.test/review?stars={stars}", html)
+        self.assertNotIn("<script", html)
+        self.assertNotIn("<x-dc", html)
+        self.assertNotIn("<sc-for", html)
+
     async def test_resend_request_includes_idempotency_header_and_returns_id(self):
         FakeAsyncClient.last_headers = None
+        FakeAsyncClient.last_json = None
         with (
             patch("app.routers.orders.httpx.AsyncClient", FakeAsyncClient),
             patch("app.routers.orders.settings.resend_api_key", "re_test"),
@@ -126,6 +147,7 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
             FakeAsyncClient.last_headers["Idempotency-Key"],
             _feedback_email_idempotency_key(make_row()),
         )
+        self.assertIn("Hur gick det, Anna?", FakeAsyncClient.last_json["html"])
 
 
 if __name__ == "__main__":
