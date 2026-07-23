@@ -39,6 +39,10 @@ SHEET_COLUMNS = [
     ("city", "Ort", 130),
     ("payment_details", "Betalningsuppgifter", 230),
     ("condition_answers", "Skick / frågesvar", 380),
+]
+FEEDBACK_SHEET_NAME = "Feedback"
+FEEDBACK_SHEET_COLUMNS = [
+    ("order_id", "Ordernummer", 190),
     ("feedback_email_sent_at", "Feedbackmail skickat", 175),
     ("feedback_email_status", "Feedbackmail status", 145),
     ("feedback_email_error", "Feedbackmail fel", 260),
@@ -47,6 +51,11 @@ SHEET_COLUMNS = [
 SHEET_KEYS = [key for key, _, _ in SHEET_COLUMNS]
 SHEET_HEADERS = [header for _, header, _ in SHEET_COLUMNS]
 SHEET_HEADER_TO_KEY = {header: key for key, header, _ in SHEET_COLUMNS}
+FEEDBACK_SHEET_KEYS = [key for key, _, _ in FEEDBACK_SHEET_COLUMNS]
+FEEDBACK_SHEET_HEADERS = [header for _, header, _ in FEEDBACK_SHEET_COLUMNS]
+FEEDBACK_SHEET_HEADER_TO_KEY = {
+    header: key for key, header, _ in FEEDBACK_SHEET_COLUMNS
+}
 
 
 class OrderCustomer(BaseModel):
@@ -221,10 +230,6 @@ def _sheet_row(order: OrderOut) -> dict[str, Any]:
         "city": order.customer.city,
         "payment_details": _format_payment_details(order.payment),
         "condition_answers": _format_condition_answers(order.condition_answers, order.color),
-        "feedback_email_sent_at": "",
-        "feedback_email_status": "",
-        "feedback_email_error": "",
-        "feedback_email_id": "",
     }
 
 
@@ -286,8 +291,115 @@ def _sheet_values_range(sheet_name: str) -> str:
     return httpx.URL(f"https://example.com/{sheet_name}!A:{last_column}").raw_path.decode().lstrip("/")
 
 
+def _feedback_sheet_values_range() -> str:
+    last_column = _sheet_column_letter(len(FEEDBACK_SHEET_COLUMNS))
+    return httpx.URL(
+        f"https://example.com/{FEEDBACK_SHEET_NAME}!A:{last_column}"
+    ).raw_path.decode().lstrip("/")
+
+
 def _sheet_column_index(key: str) -> int:
     return next(index for index, (column_key, _, _) in enumerate(SHEET_COLUMNS) if column_key == key)
+
+
+def _feedback_sheet_column_index(key: str) -> int:
+    return next(
+        index
+        for index, (column_key, _, _) in enumerate(FEEDBACK_SHEET_COLUMNS)
+        if column_key == key
+    )
+
+
+def _row_mapping(
+    headers: list[str],
+    row: list[Any],
+    keys: list[str],
+    header_to_key: dict[str, str],
+) -> dict[str, Any]:
+    mapped: dict[str, Any] = {}
+    for index, header in enumerate(headers):
+        key = header if header in keys else header_to_key.get(header)
+        if key:
+            mapped[key] = row[index] if index < len(row) else ""
+    return mapped
+
+
+def _feedback_sheet_rows(
+    order_headers: list[str],
+    order_rows: list[list[Any]],
+    existing_feedback_values: list[list[Any]],
+) -> list[list[Any]]:
+    existing_by_order: dict[str, dict[str, Any]] = {}
+    existing_order_sequence: list[str] = []
+    if existing_feedback_values:
+        feedback_headers = existing_feedback_values[0]
+        for raw_row in existing_feedback_values[1:]:
+            mapped = _row_mapping(
+                feedback_headers,
+                raw_row,
+                FEEDBACK_SHEET_KEYS,
+                FEEDBACK_SHEET_HEADER_TO_KEY,
+            )
+            order_id = str(mapped.get("order_id") or "").strip()
+            if order_id and order_id not in existing_by_order:
+                existing_by_order[order_id] = mapped
+                existing_order_sequence.append(order_id)
+
+    merged_by_order: dict[str, dict[str, Any]] = {}
+    order_sequence: list[str] = []
+    for raw_row in order_rows:
+        mapped = _row_mapping(
+            order_headers,
+            raw_row,
+            SHEET_KEYS + FEEDBACK_SHEET_KEYS,
+            {**SHEET_HEADER_TO_KEY, **FEEDBACK_SHEET_HEADER_TO_KEY},
+        )
+        order_id = str(mapped.get("order_id") or "").strip()
+        if not order_id or order_id in merged_by_order:
+            continue
+
+        existing = existing_by_order.get(order_id, {})
+        merged = {"order_id": order_id}
+        for key in FEEDBACK_SHEET_KEYS[1:]:
+            merged[key] = existing.get(key) or mapped.get(key) or ""
+        merged_by_order[order_id] = merged
+        order_sequence.append(order_id)
+
+    for order_id in existing_order_sequence:
+        if order_id not in merged_by_order:
+            merged_by_order[order_id] = existing_by_order[order_id]
+            order_sequence.append(order_id)
+
+    return [
+        FEEDBACK_SHEET_HEADERS,
+        *[
+            [merged_by_order[order_id].get(key, "") for key in FEEDBACK_SHEET_KEYS]
+            for order_id in order_sequence
+        ],
+    ]
+
+
+def _feedback_status_rows(
+    feedback_values: list[list[Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
+    statuses: dict[str, dict[str, Any]] = {}
+    row_numbers: dict[str, int] = {}
+    if not feedback_values:
+        return statuses, row_numbers
+
+    headers = feedback_values[0]
+    for row_number, raw_row in enumerate(feedback_values[1:], start=2):
+        mapped = _row_mapping(
+            headers,
+            raw_row,
+            FEEDBACK_SHEET_KEYS,
+            FEEDBACK_SHEET_HEADER_TO_KEY,
+        )
+        order_id = str(mapped.get("order_id") or "").strip()
+        if order_id and order_id not in statuses:
+            statuses[order_id] = mapped
+            row_numbers[order_id] = row_number
+    return statuses, row_numbers
 
 
 def _load_service_account_info() -> dict[str, Any]:
@@ -320,8 +432,12 @@ async def _get_google_access_token() -> str:
     return credentials.token
 
 
-async def _get_google_sheet_id(client: httpx.AsyncClient, token: str) -> int:
-    sheet_name = settings.google_sheets_worksheet_name
+async def _get_google_sheet_id(
+    client: httpx.AsyncClient,
+    token: str,
+    sheet_name: str | None = None,
+) -> int:
+    sheet_name = sheet_name or settings.google_sheets_worksheet_name
     spreadsheet_id = settings.google_sheets_spreadsheet_id
     headers = {"Authorization": f"Bearer {token}"}
     response = await client.get(
@@ -337,6 +453,27 @@ async def _get_google_sheet_id(client: httpx.AsyncClient, token: str) -> int:
             return int(properties["sheetId"])
 
     raise ValueError(f"Worksheet '{sheet_name}' saknas i Google Sheet.")
+
+
+async def _get_or_create_google_sheet_id(
+    client: httpx.AsyncClient,
+    token: str,
+    sheet_name: str,
+) -> int:
+    try:
+        return await _get_google_sheet_id(client, token, sheet_name)
+    except ValueError:
+        spreadsheet_id = settings.google_sheets_spreadsheet_id
+        response = await client.post(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"requests": [{"addSheet": {"properties": {"title": sheet_name}}}]},
+        )
+        response.raise_for_status()
+        replies = response.json().get("replies", [])
+        if not replies:
+            raise ValueError(f"Kunde inte skapa worksheet '{sheet_name}'.")
+        return int(replies[0]["addSheet"]["properties"]["sheetId"])
 
 
 def _google_sheet_data_row_format() -> dict[str, Any]:
@@ -367,9 +504,15 @@ def _range_end_row(range_name: str) -> int | None:
     return int(digits) if digits else None
 
 
-async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: int) -> None:
+async def _format_google_sheet_columns(
+    client: httpx.AsyncClient,
+    token: str,
+    sheet_id: int,
+    columns: list[tuple[str, str, int]],
+    money_keys: tuple[str, ...] = (),
+) -> None:
     spreadsheet_id = settings.google_sheets_spreadsheet_id
-    column_count = len(SHEET_COLUMNS)
+    column_count = len(columns)
     requests: list[dict[str, Any]] = [
         {
             "updateSheetProperties": {
@@ -442,7 +585,7 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
         },
     ]
 
-    for index, (_, _, width) in enumerate(SHEET_COLUMNS):
+    for index, (_, _, width) in enumerate(columns):
         requests.append(
             {
                 "updateDimensionProperties": {
@@ -458,8 +601,12 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
             }
         )
 
-    for money_key in ("price_sek", "bid_difference_sek"):
-        money_col = _sheet_column_index(money_key)
+    for money_key in money_keys:
+        money_col = next(
+            index
+            for index, (column_key, _, _) in enumerate(columns)
+            if column_key == money_key
+        )
         requests.append(
             {
                 "repeatCell": {
@@ -486,6 +633,142 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
         json={"requests": requests},
     )
     response.raise_for_status()
+
+
+async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: int) -> None:
+    await _format_google_sheet_columns(
+        client,
+        token,
+        sheet_id,
+        SHEET_COLUMNS,
+        ("price_sek", "bid_difference_sek"),
+    )
+
+
+async def _migrate_feedback_sheet_layout(
+    client: httpx.AsyncClient,
+    token: str,
+) -> tuple[int, int]:
+    sheet_name = settings.google_sheets_worksheet_name
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    order_header_range = httpx.URL(
+        f"https://example.com/{sheet_name}!1:1"
+    ).raw_path.decode().lstrip("/")
+    header_response = await client.get(
+        f"{base_url}/{order_header_range}",
+        headers=headers,
+    )
+    header_response.raise_for_status()
+    header_values = header_response.json().get("values", [])
+    order_headers = header_values[0] if header_values else []
+    order_column_count = max(len(order_headers), len(SHEET_COLUMNS))
+    order_last_column = _sheet_column_letter(order_column_count)
+    order_range = httpx.URL(
+        f"https://example.com/{sheet_name}!A:{order_last_column}"
+    ).raw_path.decode().lstrip("/")
+    orders_response = await client.get(f"{base_url}/{order_range}", headers=headers)
+    orders_response.raise_for_status()
+    order_values = orders_response.json().get("values", [])
+    if order_values:
+        order_headers = order_values[0]
+        order_rows = order_values[1:]
+    else:
+        order_headers = SHEET_HEADERS
+        order_rows = []
+
+    feedback_sheet_id = await _get_or_create_google_sheet_id(
+        client,
+        token,
+        FEEDBACK_SHEET_NAME,
+    )
+    feedback_range = _feedback_sheet_values_range()
+    feedback_response = await client.get(
+        f"{base_url}/{feedback_range}",
+        headers=headers,
+    )
+    feedback_response.raise_for_status()
+    existing_feedback_values = feedback_response.json().get("values", [])
+    feedback_rows = _feedback_sheet_rows(
+        order_headers,
+        order_rows,
+        existing_feedback_values,
+    )
+
+    clear_response = await client.post(
+        f"{base_url}/{feedback_range}:clear",
+        headers=headers,
+        json={},
+    )
+    clear_response.raise_for_status()
+    update_response = await client.put(
+        f"{base_url}/{feedback_range}",
+        params={"valueInputOption": "USER_ENTERED"},
+        headers=headers,
+        json={"values": feedback_rows},
+    )
+    update_response.raise_for_status()
+
+    verify_response = await client.get(
+        f"{base_url}/{feedback_range}",
+        headers=headers,
+    )
+    verify_response.raise_for_status()
+    verified_values = verify_response.json().get("values", [])
+    expected_statuses, _ = _feedback_status_rows(feedback_rows)
+    verified_statuses, _ = _feedback_status_rows(verified_values)
+    if not verified_values or verified_values[0] != FEEDBACK_SHEET_HEADERS:
+        raise ValueError("Feedback-arket kunde inte verifieras efter migreringen.")
+    if set(verified_statuses) != set(expected_statuses):
+        raise ValueError("Alla ordernummer kunde inte verifieras i Feedback-arket.")
+    for order_id, expected in expected_statuses.items():
+        actual = verified_statuses[order_id]
+        if any(
+            str(actual.get(key) or "") != str(expected.get(key) or "")
+            for key in FEEDBACK_SHEET_KEYS[1:]
+        ):
+            raise ValueError(
+                f"Feedbackstatus för order {order_id} kunde inte verifieras."
+            )
+
+    legacy_headers = set(FEEDBACK_SHEET_HEADERS[1:])
+    legacy_column_indices = [
+        index
+        for index, header in enumerate(order_headers)
+        if header in legacy_headers
+    ]
+    if legacy_column_indices:
+        order_sheet_id = await _get_google_sheet_id(client, token, sheet_name)
+        delete_response = await client.post(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+            headers=headers,
+            json={
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": order_sheet_id,
+                                "dimension": "COLUMNS",
+                                "startIndex": index,
+                                "endIndex": index + 1,
+                            }
+                        }
+                    }
+                    for index in sorted(legacy_column_indices, reverse=True)
+                ]
+            },
+        )
+        delete_response.raise_for_status()
+
+    await _format_google_sheet_columns(
+        client,
+        token,
+        feedback_sheet_id,
+        FEEDBACK_SHEET_COLUMNS,
+    )
+    return len(feedback_rows) - 1, len(legacy_column_indices)
 
 
 async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> None:
@@ -630,6 +913,8 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
                 )
                 format_response.raise_for_status()
 
+            await _migrate_feedback_sheet_layout(client, token)
+
         return IntegrationStatus(configured=True, ok=True, message="Order skickad till Google Sheet via Sheets API.")
     except Exception as exc:
         logger.exception("Kunde inte skicka order %s till Google Sheets API", order.order_id)
@@ -680,8 +965,13 @@ async def refresh_order_sheet_layout(x_api_key: str = Header(..., alias="X-API-K
     try:
         token = await _get_google_access_token()
         async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+            await _migrate_feedback_sheet_layout(client, token)
             await _rebuild_google_sheet(client, token)
-        return IntegrationStatus(configured=True, ok=True, message="Orderarket har formaterats.")
+        return IntegrationStatus(
+            configured=True,
+            ok=True,
+            message="Order- och Feedback-arken har formaterats.",
+        )
     except Exception as exc:
         logger.exception("Kunde inte formatera orderarket")
         return IntegrationStatus(configured=True, ok=False, message=str(exc))
@@ -1335,14 +1625,17 @@ async def _update_feedback_email_sheet_status(
     client: httpx.AsyncClient,
     base_url: str,
     headers: dict[str, str],
-    sheet_name: str,
-    sheet_row_number: int,
+    feedback_row_number: int,
     values: list[Any],
 ) -> None:
-    start_col = _sheet_column_letter(_sheet_column_index("feedback_email_sent_at") + 1)
-    end_col = _sheet_column_letter(_sheet_column_index("feedback_email_id") + 1)
+    start_col = _sheet_column_letter(
+        _feedback_sheet_column_index("feedback_email_sent_at") + 1
+    )
+    end_col = _sheet_column_letter(
+        _feedback_sheet_column_index("feedback_email_id") + 1
+    )
     update_range = httpx.URL(
-        f"https://example.com/{sheet_name}!{start_col}{sheet_row_number}:{end_col}{sheet_row_number}"
+        f"https://example.com/{FEEDBACK_SHEET_NAME}!{start_col}{feedback_row_number}:{end_col}{feedback_row_number}"
     ).raw_path.decode().lstrip("/")
     response = await client.put(
         f"{base_url}/{update_range}",
@@ -1379,6 +1672,7 @@ async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
         now = datetime.now(timezone.utc)
 
         async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+            await _migrate_feedback_sheet_layout(client, token)
             await _ensure_google_sheet_layout(client, token)
 
             get_response = await client.get(f"{base_url}/{encoded_range}", headers=headers)
@@ -1387,13 +1681,29 @@ async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
             if not values:
                 return IntegrationStatus(configured=True, ok=True, message="Orderarket är tomt; inga feedbackmail skickades.")
 
+            feedback_response = await client.get(
+                f"{base_url}/{_feedback_sheet_values_range()}",
+                headers=headers,
+            )
+            feedback_response.raise_for_status()
+            feedback_values = feedback_response.json().get("values", [])
+            feedback_statuses, feedback_row_numbers = _feedback_status_rows(
+                feedback_values
+            )
+
             source_headers = values[0]
             rows: list[tuple[int, dict[str, Any]]] = []
-            for sheet_row_number, raw_row in enumerate(values[1:], start=2):
+            for raw_row in values[1:]:
                 normalized = _normalize_existing_sheet_row(source_headers, raw_row)
                 row = {key: normalized[index] if index < len(normalized) else "" for index, key in enumerate(SHEET_KEYS)}
+                order_id = _feedback_row_value(row, "order_id")
+                feedback_status = feedback_statuses.get(order_id, {})
+                for key in FEEDBACK_SHEET_KEYS[1:]:
+                    row[key] = feedback_status.get(key, "")
                 if _feedback_candidate_is_due(row, now):
-                    rows.append((sheet_row_number, row))
+                    feedback_row_number = feedback_row_numbers.get(order_id)
+                    if feedback_row_number:
+                        rows.append((feedback_row_number, row))
 
             if dry_run:
                 return IntegrationStatus(
@@ -1402,13 +1712,12 @@ async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
                     message=f"Feedbackmail dry-run: {len(rows)} orderrader är redo för utskick.",
                 )
 
-            for sheet_row_number, row in rows[: settings.feedback_email_batch_size]:
+            for feedback_row_number, row in rows[: settings.feedback_email_batch_size]:
                 await _update_feedback_email_sheet_status(
                     client,
                     base_url,
                     headers,
-                    sheet_name,
-                    sheet_row_number,
+                    feedback_row_number,
                     ["", "sending", "", ""],
                 )
 
@@ -1425,8 +1734,7 @@ async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
                     client,
                     base_url,
                     headers,
-                    sheet_name,
-                    sheet_row_number,
+                    feedback_row_number,
                     status_values,
                 )
 

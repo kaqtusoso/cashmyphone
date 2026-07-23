@@ -3,10 +3,14 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from app.routers.orders import (
+    FEEDBACK_SHEET_HEADERS,
+    SHEET_HEADERS,
     _build_feedback_email,
     _feedback_candidate_is_due,
     _feedback_email_html,
     _feedback_email_idempotency_key,
+    _feedback_sheet_rows,
+    _feedback_status_rows,
     _send_feedback_email_resend,
 )
 
@@ -55,6 +59,57 @@ class FakeAsyncClient:
 
 
 class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
+    def test_feedback_columns_live_only_in_feedback_sheet(self):
+        self.assertNotIn("Feedbackmail skickat", SHEET_HEADERS)
+        self.assertNotIn("Feedbackmail status", SHEET_HEADERS)
+        self.assertNotIn("Feedbackmail fel", SHEET_HEADERS)
+        self.assertNotIn("Resend mejl-ID", SHEET_HEADERS)
+        self.assertEqual(
+            FEEDBACK_SHEET_HEADERS,
+            [
+                "Ordernummer",
+                "Feedbackmail skickat",
+                "Feedbackmail status",
+                "Feedbackmail fel",
+                "Resend mejl-ID",
+            ],
+        )
+
+    def test_feedback_sheet_rows_migrate_legacy_values_and_preserve_existing(self):
+        legacy_headers = [
+            *SHEET_HEADERS,
+            "Feedbackmail skickat",
+            "Feedbackmail status",
+            "Feedbackmail fel",
+            "Resend mejl-ID",
+        ]
+        first_order = [""] * len(legacy_headers)
+        first_order[legacy_headers.index("Ordernummer")] = "TLV-FIRST"
+        first_order[legacy_headers.index("Feedbackmail skickat")] = "2026-08-06 09:15"
+        first_order[legacy_headers.index("Feedbackmail status")] = "sent"
+        first_order[legacy_headers.index("Resend mejl-ID")] = "legacy-id"
+        second_order = [""] * len(legacy_headers)
+        second_order[legacy_headers.index("Ordernummer")] = "TLV-SECOND"
+
+        rows = _feedback_sheet_rows(
+            legacy_headers,
+            [first_order, second_order],
+            [
+                FEEDBACK_SHEET_HEADERS,
+                ["TLV-FIRST", "2026-08-06 09:16", "sent", "", "existing-id"],
+            ],
+        )
+
+        self.assertEqual(rows[0], FEEDBACK_SHEET_HEADERS)
+        self.assertEqual(
+            rows[1],
+            ["TLV-FIRST", "2026-08-06 09:16", "sent", "", "existing-id"],
+        )
+        self.assertEqual(rows[2], ["TLV-SECOND", "", "", "", ""])
+        statuses, row_numbers = _feedback_status_rows(rows)
+        self.assertEqual(statuses["TLV-FIRST"]["feedback_email_id"], "existing-id")
+        self.assertEqual(row_numbers, {"TLV-FIRST": 2, "TLV-SECOND": 3})
+
     def test_order_becomes_due_after_fourteen_days(self):
         now = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
         with (
