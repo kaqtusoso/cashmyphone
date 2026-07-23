@@ -28,6 +28,15 @@ SMTP_REPLY_TO=televerasverige@gmail.com
 SMTP_USE_TLS=true
 ORDER_ADMIN_EMAIL=
 ORDER_SUBMISSION_TIMEOUT_SECONDS=10
+
+# Trustpilot-feedback 14 dagar efter order. Kräver Google Sheets API.
+FEEDBACK_EMAIL_ENABLED=false
+FEEDBACK_EMAIL_START_DATE=2026-07-23
+TRUSTPILOT_REVIEW_URL=https://se.trustpilot.com/evaluate/televera.se
+FEEDBACK_EMAIL_DELAY_DAYS=14
+FEEDBACK_EMAIL_CRON_HOUR=9
+FEEDBACK_EMAIL_CRON_MINUTE=15
+FEEDBACK_EMAIL_BATCH_SIZE=50
 ```
 
 ## Resend
@@ -54,6 +63,36 @@ Username: resend
 Password: Resend API key
 Security: STARTTLS
 ```
+
+## Automatiskt Trustpilot-feedbackmail
+
+När `FEEDBACK_EMAIL_ENABLED=true` kör backend ett dagligt jobb som läser
+`Orders`-fliken och skickar ett neutralt Trustpilot-mail till kunder vars order
+är minst `FEEDBACK_EMAIL_DELAY_DAYS` gammal. `FEEDBACK_EMAIL_START_DATE`
+begränsar automatiseringen till order lagda från och med aktiveringsdatumet, så
+att äldre kunder inte får oväntade retroaktiva utskick.
+
+Jobbet markerar varje orderrad med:
+
+- `Feedbackmail skickat`
+- `Feedbackmail status`
+- `Feedbackmail fel`
+- `Resend mejl-ID`
+
+Innan utskicket markeras raden som `sending`. Resend-anropet använder dessutom
+en stabil idempotency-nyckel per order. Det förhindrar dubbla utskick om Resend
+tar emot mailet men en efterföljande uppdatering av kalkylarket misslyckas.
+
+En säker produktionskontroll som inte skickar mail kan köras med:
+
+```bash
+curl -X POST "$API_URL/api/orders/feedback-emails/run?dry_run=true" \
+  -H "X-API-Key: $SCRAPE_API_KEY"
+```
+
+Trustpilots företagsriktlinjer kräver rättvisa, neutrala inbjudningar utan
+incitament. Mallen ber därför kunden dela sin upplevelse, inte lämna ett
+positivt betyg.
 
 ## Google Sheets via service account
 
@@ -125,6 +164,10 @@ Postnummer
 Ort
 Betalningsuppgifter
 Skick / frågesvar
+Feedbackmail skickat
+Feedbackmail status
+Feedbackmail fel
+Resend mejl-ID
 ```
 
 `Betalningsuppgifter` och `Skick / frågesvar` sparas som läsbar flerradig text i cellen.

@@ -45,6 +45,7 @@ def setup_scheduler():
     """Konfigurera och starta APScheduler."""
     from .scrapers import run_all_scrapers
     from .database import AsyncSessionLocal
+    from .routers.orders import run_order_feedback_emails
     from scripts.update_used_phone_catalog import update_used_phone_catalog
 
     async def scheduled_scrape():
@@ -70,6 +71,14 @@ def setup_scheduler():
                 len(scraper_errors),
                 ", ".join(f"{r['retailer']}={r.get('error_type')}" for r in scraper_errors),
             )
+
+    async def scheduled_feedback_emails():
+        logger.info("📩 Schemalagda feedbackmail startar...")
+        result = await run_order_feedback_emails()
+        if result.ok:
+            logger.info(result.message)
+        else:
+            logger.warning(result.message)
 
     scheduler.add_job(
         scheduled_scrape,
@@ -101,6 +110,22 @@ def setup_scheduler():
         misfire_grace_time=USED_PHONE_CATALOG_MISFIRE_GRACE_SECONDS,
     )
 
+    if settings.feedback_email_enabled:
+        scheduler.add_job(
+            scheduled_feedback_emails,
+            trigger=CronTrigger(
+                hour=settings.feedback_email_cron_hour,
+                minute=settings.feedback_email_cron_minute,
+                timezone=settings.scrape_timezone,
+            ),
+            id="order_feedback_emails",
+            name="Skicka Trustpilot-feedbackmail",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=900,
+        )
+
     if settings.used_phone_catalog_update_on_startup:
         scheduler.add_job(
             scheduled_used_phone_catalog,
@@ -117,8 +142,13 @@ def setup_scheduler():
 
     scheduler.start()
     logger.info(
-        "✅ Scheduler igång – säljpriser %s:00, begagnat-katalog %s:00 (%s)",
+        "✅ Scheduler igång – säljpriser %s:00, begagnat-katalog %s:00, feedbackmail %s (%s)",
         settings.scrape_cron_hours,
         settings.used_phone_catalog_cron_hours,
+        (
+            f"{settings.feedback_email_cron_hour:02d}:{settings.feedback_email_cron_minute:02d}"
+            if settings.feedback_email_enabled
+            else "av"
+        ),
         settings.scrape_timezone,
     )

@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     smtp_reply_to: str = ""
     smtp_use_tls: bool = True
     order_submission_timeout_seconds: int = 10
+    trustpilot_review_url: str = ""
+    feedback_email_enabled: bool = False
+    feedback_email_start_date: str = ""
+    feedback_email_delay_days: int = 14
+    feedback_email_cron_hour: int = 9
+    feedback_email_cron_minute: int = 15
+    feedback_email_batch_size: int = 50
     public_base_url: str = "https://cashmyphone-production.up.railway.app"
 
     @property

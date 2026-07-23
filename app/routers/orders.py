@@ -2,9 +2,10 @@ import json
 import logging
 import smtplib
 from asyncio import create_task, gather, to_thread
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
+from hashlib import sha256
 from html import escape
 from typing import Any, Literal
 from uuid import uuid4
@@ -38,6 +39,10 @@ SHEET_COLUMNS = [
     ("city", "Ort", 130),
     ("payment_details", "Betalningsuppgifter", 230),
     ("condition_answers", "Skick / frågesvar", 380),
+    ("feedback_email_sent_at", "Feedbackmail skickat", 175),
+    ("feedback_email_status", "Feedbackmail status", 145),
+    ("feedback_email_error", "Feedbackmail fel", 260),
+    ("feedback_email_id", "Resend mejl-ID", 245),
 ]
 SHEET_KEYS = [key for key, _, _ in SHEET_COLUMNS]
 SHEET_HEADERS = [header for _, header, _ in SHEET_COLUMNS]
@@ -216,6 +221,10 @@ def _sheet_row(order: OrderOut) -> dict[str, Any]:
         "city": order.customer.city,
         "payment_details": _format_payment_details(order.payment),
         "condition_answers": _format_condition_answers(order.condition_answers, order.color),
+        "feedback_email_sent_at": "",
+        "feedback_email_status": "",
+        "feedback_email_error": "",
+        "feedback_email_id": "",
     }
 
 
@@ -492,8 +501,18 @@ async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> 
     existing_values = get_response.json().get("values", [])
 
     if existing_values and existing_values[0] != SHEET_HEADERS:
-        await _rebuild_google_sheet(client, token)
-        return
+        existing_headers = existing_values[0]
+        if existing_headers == SHEET_HEADERS[: len(existing_headers)]:
+            update_response = await client.put(
+                f"{base_url}/{encoded_range}",
+                params={"valueInputOption": "RAW"},
+                headers=headers,
+                json={"values": [SHEET_HEADERS]},
+            )
+            update_response.raise_for_status()
+        else:
+            await _rebuild_google_sheet(client, token)
+            return
 
     if not existing_values:
         update_response = await client.put(
@@ -1018,6 +1037,325 @@ async def _send_confirmation_email(order: OrderOut) -> IntegrationStatus:
 def _confirmation_email_is_configured() -> bool:
     from_email = settings.smtp_from_email or settings.order_email_from
     return bool((_resend_api_key() and from_email) or (settings.smtp_host and settings.smtp_username and settings.smtp_password and from_email))
+
+
+def _require_order_admin_key(x_api_key: str | None) -> None:
+    if not settings.scrape_api_key or x_api_key != settings.scrape_api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def _feedback_row_value(row: dict[str, Any], key: str) -> str:
+    return str(row.get(key) or "").strip()
+
+
+def _parse_feedback_order_datetime(value: str) -> datetime | None:
+    value = value.strip()
+    if not value:
+        return None
+
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _feedback_email_subject(row: dict[str, Any]) -> str:
+    order_id = _feedback_row_value(row, "order_id")
+    return f"Hur gick det med Televera?{f' ({order_id})' if order_id else ''}"
+
+
+def _feedback_email_idempotency_key(row: dict[str, Any]) -> str:
+    identity = "|".join(
+        (
+            _feedback_row_value(row, "order_id"),
+            _feedback_row_value(row, "email").lower(),
+            _feedback_row_value(row, "created_at"),
+        )
+    )
+    digest = sha256(identity.encode("utf-8")).hexdigest()[:32]
+    return f"televera-feedback/{digest}"
+
+
+def _feedback_email_text(row: dict[str, Any]) -> str:
+    first_name = _feedback_row_value(row, "first_name") or "hej"
+    model = _feedback_row_value(row, "model")
+    order_id = _feedback_row_value(row, "order_id")
+    trustpilot_url = settings.trustpilot_review_url.strip()
+    order_line = f"\nOrdernummer: {order_id}" if order_id else ""
+    model_line = f"\nMobil: {model}" if model else ""
+
+    return f"""Hej {first_name},
+
+Det har gått ungefär två veckor sedan du gjorde din beställning via Televera.
+
+Vi vill gärna veta hur du upplevde tjänsten. Om du har en minut över får du gärna lämna ett omdöme på Trustpilot:
+
+{trustpilot_url}
+{order_line}{model_line}
+
+Tack för att du hjälper oss att göra Televera bättre.
+
+Hälsningar,
+Televera
+"""
+
+
+def _feedback_email_html(row: dict[str, Any]) -> str:
+    first_name = escape(_feedback_row_value(row, "first_name") or "hej")
+    model = escape(_feedback_row_value(row, "model"))
+    order_id = escape(_feedback_row_value(row, "order_id"))
+    trustpilot_url = escape(settings.trustpilot_review_url.strip(), quote=True)
+    details = []
+    if order_id:
+        details.append(f"Ordernummer: {order_id}")
+    if model:
+        details.append(f"Mobil: {model}")
+    details_html = "".join(f"<div>{detail}</div>" for detail in details)
+
+    return f"""<!doctype html>
+<html lang="sv">
+  <body style="margin:0;padding:0;background:#f6f7f4;color:#17211b;font-family:Arial,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f7f4;padding:28px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #dce5dc;border-radius:14px;overflow:hidden;">
+            <tr>
+              <td style="padding:28px 28px 10px;">
+                <div style="font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:#00734f;font-weight:700;">Televera</div>
+                <h1 style="margin:14px 0 12px;font-size:24px;line-height:1.25;color:#17211b;">Hur gick det?</h1>
+                <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Hej {first_name},</p>
+                <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Det har gått ungefär två veckor sedan du gjorde din beställning via Televera. Vi vill gärna veta hur du upplevde tjänsten.</p>
+                <p style="margin:0 0 24px;font-size:16px;line-height:1.6;">Om du har en minut över får du gärna lämna ett omdöme på Trustpilot.</p>
+                <a href="{trustpilot_url}" style="display:inline-block;background:#00734f;color:#ffffff;text-decoration:none;border-radius:8px;padding:13px 18px;font-size:15px;font-weight:700;">Lämna omdöme på Trustpilot</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 28px 28px;color:#5f6f65;font-size:13px;line-height:1.5;">
+                {details_html}
+                <div style="margin-top:16px;">Tack för att du hjälper oss att göra Televera bättre.</div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"""
+
+
+def _build_feedback_email(row: dict[str, Any]) -> EmailMessage:
+    from_email = settings.smtp_from_email or settings.order_email_from
+    from_name = settings.smtp_from_name or "Televera"
+
+    message = EmailMessage()
+    message["From"] = formataddr((from_name, from_email))
+    message["To"] = _feedback_row_value(row, "email")
+    if settings.smtp_reply_to:
+        message["Reply-To"] = settings.smtp_reply_to
+    message["Resend-Idempotency-Key"] = _feedback_email_idempotency_key(row)
+    message["Subject"] = _feedback_email_subject(row)
+    message.set_content(_feedback_email_text(row))
+    message.add_alternative(_feedback_email_html(row), subtype="html")
+    return message
+
+
+def _send_feedback_email_sync(row: dict[str, Any]) -> None:
+    message = _build_feedback_email(row)
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=settings.order_submission_timeout_seconds) as smtp:
+        if settings.smtp_use_tls:
+            smtp.starttls()
+        smtp.login(settings.smtp_username, settings.smtp_password)
+        smtp.send_message(message)
+
+
+async def _send_feedback_email_resend(row: dict[str, Any]) -> str:
+    from_email = settings.smtp_from_email or settings.order_email_from
+    from_name = settings.smtp_from_name or "Televera"
+    payload: dict[str, Any] = {
+        "from": formataddr((from_name, from_email)),
+        "to": [_feedback_row_value(row, "email")],
+        "subject": _feedback_email_subject(row),
+        "text": _feedback_email_text(row),
+        "html": _feedback_email_html(row),
+    }
+    if settings.smtp_reply_to:
+        payload["reply_to"] = settings.smtp_reply_to
+
+    async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+        response = await client.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {_resend_api_key()}",
+                "Content-Type": "application/json",
+                "Idempotency-Key": _feedback_email_idempotency_key(row),
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        return str(response.json().get("id") or "")
+
+
+def _feedback_email_is_configured() -> bool:
+    from_email = settings.smtp_from_email or settings.order_email_from
+    resend_configured = bool(_resend_api_key() and from_email)
+    smtp_configured = bool(settings.smtp_host and settings.smtp_username and settings.smtp_password and from_email)
+    return bool(
+        settings.feedback_email_enabled
+        and settings.feedback_email_start_date.strip()
+        and settings.trustpilot_review_url.strip()
+        and (resend_configured or smtp_configured)
+    )
+
+
+async def _send_feedback_email(row: dict[str, Any]) -> str:
+    if _resend_api_key():
+        return await _send_feedback_email_resend(row)
+    await to_thread(_send_feedback_email_sync, row)
+    return ""
+
+
+def _feedback_candidate_is_due(row: dict[str, Any], now: datetime) -> bool:
+    if _feedback_row_value(row, "feedback_email_sent_at"):
+        return False
+    if not _feedback_row_value(row, "email"):
+        return False
+    if _feedback_row_value(row, "feedback_email_status").lower() in {"sending", "sent", "scheduled"}:
+        return False
+
+    created_at = _parse_feedback_order_datetime(_feedback_row_value(row, "created_at"))
+    start_at = _parse_feedback_order_datetime(settings.feedback_email_start_date)
+    if not created_at or not start_at or created_at < start_at:
+        return False
+
+    return created_at <= now - timedelta(days=settings.feedback_email_delay_days)
+
+
+async def _update_feedback_email_sheet_status(
+    client: httpx.AsyncClient,
+    base_url: str,
+    headers: dict[str, str],
+    sheet_name: str,
+    sheet_row_number: int,
+    values: list[Any],
+) -> None:
+    start_col = _sheet_column_letter(_sheet_column_index("feedback_email_sent_at") + 1)
+    end_col = _sheet_column_letter(_sheet_column_index("feedback_email_id") + 1)
+    update_range = httpx.URL(
+        f"https://example.com/{sheet_name}!{start_col}{sheet_row_number}:{end_col}{sheet_row_number}"
+    ).raw_path.decode().lstrip("/")
+    response = await client.put(
+        f"{base_url}/{update_range}",
+        params={"valueInputOption": "USER_ENTERED"},
+        headers=headers,
+        json={"values": [values]},
+    )
+    response.raise_for_status()
+
+
+async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
+    if not _feedback_email_is_configured():
+        return IntegrationStatus(
+            configured=False,
+            ok=True,
+            message="Feedbackmail är inte aktiverat eller saknar startdatum, Trustpilot-länk eller mailinställningar.",
+        )
+    if not settings.google_service_account_json or not settings.google_sheets_spreadsheet_id:
+        return IntegrationStatus(
+            configured=False,
+            ok=True,
+            message="Feedbackmail kräver Google Sheets API med service account och spreadsheet ID.",
+        )
+
+    try:
+        token = await _get_google_access_token()
+        sheet_name = settings.google_sheets_worksheet_name
+        spreadsheet_id = settings.google_sheets_spreadsheet_id
+        encoded_range = _sheet_values_range(sheet_name)
+        base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values"
+        headers = {"Authorization": f"Bearer {token}"}
+        sent_count = 0
+        failed_count = 0
+        now = datetime.now(timezone.utc)
+
+        async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+            await _ensure_google_sheet_layout(client, token)
+
+            get_response = await client.get(f"{base_url}/{encoded_range}", headers=headers)
+            get_response.raise_for_status()
+            values = get_response.json().get("values", [])
+            if not values:
+                return IntegrationStatus(configured=True, ok=True, message="Orderarket är tomt; inga feedbackmail skickades.")
+
+            source_headers = values[0]
+            rows: list[tuple[int, dict[str, Any]]] = []
+            for sheet_row_number, raw_row in enumerate(values[1:], start=2):
+                normalized = _normalize_existing_sheet_row(source_headers, raw_row)
+                row = {key: normalized[index] if index < len(normalized) else "" for index, key in enumerate(SHEET_KEYS)}
+                if _feedback_candidate_is_due(row, now):
+                    rows.append((sheet_row_number, row))
+
+            if dry_run:
+                return IntegrationStatus(
+                    configured=True,
+                    ok=True,
+                    message=f"Feedbackmail dry-run: {len(rows)} orderrader är redo för utskick.",
+                )
+
+            for sheet_row_number, row in rows[: settings.feedback_email_batch_size]:
+                await _update_feedback_email_sheet_status(
+                    client,
+                    base_url,
+                    headers,
+                    sheet_name,
+                    sheet_row_number,
+                    ["", "sending", "", ""],
+                )
+
+                try:
+                    email_id = await _send_feedback_email(row)
+                    sent_count += 1
+                    status_values = [now.strftime("%Y-%m-%d %H:%M"), "sent", "", email_id]
+                except Exception as exc:
+                    failed_count += 1
+                    logger.exception("Kunde inte skicka feedbackmail för order %s", _feedback_row_value(row, "order_id"))
+                    status_values = ["", "failed", str(exc)[:500], ""]
+
+                await _update_feedback_email_sheet_status(
+                    client,
+                    base_url,
+                    headers,
+                    sheet_name,
+                    sheet_row_number,
+                    status_values,
+                )
+
+        ok = failed_count == 0
+        return IntegrationStatus(
+            configured=True,
+            ok=ok,
+            message=f"Feedbackmail: {sent_count} skickade, {failed_count} misslyckade.",
+        )
+    except Exception as exc:
+        logger.exception("Feedbackmail-jobbet misslyckades")
+        return IntegrationStatus(configured=True, ok=False, message=str(exc))
+
+
+@router.post("/orders/feedback-emails/run", response_model=IntegrationStatus)
+async def run_feedback_emails_now(
+    dry_run: bool = False,
+    x_api_key: str | None = Header(default=None),
+):
+    _require_order_admin_key(x_api_key)
+    return await run_order_feedback_emails(dry_run=dry_run)
 
 
 @router.post("/orders", response_model=OrderCreateResponse)
