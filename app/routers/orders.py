@@ -1135,7 +1135,7 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
     details_html = "".join(f"<div>{detail}</div>" for detail in details)
     stars_html = "".join(
         f"""
-                      <td class="tv-star-cell tv-rating-{stars}" align="center" style="padding:0 5px;">
+                      <td class="tv-star-cell tv-rating-{stars}" dir="ltr" align="center" style="padding:0 5px;direction:ltr;">
                         <a class="tv-star" href="{escape(_feedback_rating_url(stars), quote=True)}" target="_blank" rel="noopener" title="{stars} av 5" aria-label="{stars} av 5 stjärnor" style="display:inline-block;width:50px;height:50px;line-height:50px;border-radius:50%;border:2px solid #dfe6e2;background:#f6f9f7;color:#c4cec8;text-align:center;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:26px;font-weight:700;">★</a>
                       </td>"""
         for stars in range(5, 0, -1)
@@ -1218,7 +1218,7 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
                 <h1 class="tv-heading" style="margin:0;font-family:'Arial Rounded MT Bold','Trebuchet MS',Arial,sans-serif;font-weight:800;font-size:32px;line-height:35px;color:#16241d;">{heading}</h1>
                 <p style="font-size:17px;line-height:26px;color:#5b6b63;margin:14px auto 0;max-width:400px;">Nu har det gått ett par veckor sedan din beställning via Televera. Lämna gärna ett snabbt betyg – din feedback hjälper oss att bli bättre.</p>
 
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:30px auto 0;">
+                <table class="tv-star-table" role="presentation" dir="rtl" cellspacing="0" cellpadding="0" border="0" align="center" style="direction:rtl;margin:30px auto 0;">
                   <tr dir="rtl" style="direction:rtl;">
                     {stars_html}
                   </tr>

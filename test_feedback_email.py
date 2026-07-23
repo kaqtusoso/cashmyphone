@@ -128,7 +128,11 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
         for stars in range(1, 6):
             self.assertIn(f"https://example.test/review?stars={stars}", html)
             self.assertIn(f"tv-star-cell tv-rating-{stars}", html)
-        self.assertIn('<tr dir="rtl" style="direction:rtl;">', html)
+        self.assertIn(
+            'class="tv-star-table" role="presentation" dir="rtl"',
+            html,
+        )
+        self.assertIn('dir="ltr" align="center"', html)
         self.assertLess(html.index("review?stars=5"), html.index("review?stars=1"))
         self.assertIn(".tv-rating-3:hover ~ .tv-star-cell .tv-star", html)
         self.assertIn("background:#ff3722 !important", html)
