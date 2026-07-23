@@ -80,6 +80,17 @@ def setup_scheduler():
         else:
             logger.warning(result.message)
 
+    async def scheduled_social_farm():
+        from .social_farm.service import scheduled_generation
+
+        logger.info("🎞️ Schemalagd Social Farm-generering startar...")
+        async with AsyncSessionLocal() as db:
+            post = await scheduled_generation(db)
+        if post:
+            logger.info("Social Farm skapade utkast %s (%s)", post.id, post.topic_key)
+        else:
+            logger.info("Social Farm: inget nytt utkast behövdes ännu")
+
     scheduler.add_job(
         scheduled_scrape,
         trigger=CronTrigger(
@@ -126,6 +137,22 @@ def setup_scheduler():
             misfire_grace_time=900,
         )
 
+    if settings.social_farm_enabled:
+        scheduler.add_job(
+            scheduled_social_farm,
+            trigger=CronTrigger(
+                hour=settings.social_farm_cron_hour,
+                minute=0,
+                timezone=settings.scrape_timezone,
+            ),
+            id="social_farm_generation",
+            name="Skapa Social Farm-utkast",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+
     if settings.used_phone_catalog_update_on_startup:
         scheduler.add_job(
             scheduled_used_phone_catalog,
@@ -142,12 +169,17 @@ def setup_scheduler():
 
     scheduler.start()
     logger.info(
-        "✅ Scheduler igång – säljpriser %s:00, begagnat-katalog %s:00, feedbackmail %s (%s)",
+        "✅ Scheduler igång – säljpriser %s:00, begagnat-katalog %s:00, feedbackmail %s, Social Farm %s (%s)",
         settings.scrape_cron_hours,
         settings.used_phone_catalog_cron_hours,
         (
             f"{settings.feedback_email_cron_hour:02d}:{settings.feedback_email_cron_minute:02d}"
             if settings.feedback_email_enabled
+            else "av"
+        ),
+        (
+            f"{settings.social_farm_cron_hour:02d}:00 / var {settings.social_farm_interval_hours}:e timme"
+            if settings.social_farm_enabled
             else "av"
         ),
         settings.scrape_timezone,

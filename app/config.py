@@ -47,6 +47,18 @@ class Settings(BaseSettings):
     feedback_email_cron_minute: int = 15
     feedback_email_batch_size: int = 50
     public_base_url: str = "https://cashmyphone-production.up.railway.app"
+    openai_api_key: str = ""
+    social_farm_enabled: bool = False
+    social_farm_cron_hour: int = 8
+    social_farm_interval_hours: int = 48
+    social_farm_topic_cooldown_days: int = 45
+    social_farm_storage_dir: str = "data/social_farm"
+    social_farm_copy_provider: str = "curated"
+    social_farm_image_provider: str = "local"
+    social_farm_text_model: str = "gpt-5.6-luna"
+    social_farm_image_model: str = "gpt-image-2"
+    social_farm_image_quality: str = "medium"
+    social_farm_generated_images_per_post: int = 2
 
     @property
     def origins_list(self) -> List[str]:

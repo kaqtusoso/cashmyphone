@@ -9,8 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from .database import AsyncSessionLocal, init_db
 from .pricing.history import bootstrap_all_current_prices
 from .scheduler import setup_scheduler, scheduler, scrape_if_prices_empty
-from .routers import orders, prices, used_phones
+from .routers import orders, prices, social_farm, used_phones
 from .config import settings
+from .social_farm.service import storage_root
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,6 +81,12 @@ app.add_middleware(
 app.include_router(prices.router)
 app.include_router(orders.router)
 app.include_router(used_phones.router)
+app.include_router(social_farm.router)
+app.mount(
+    "/social-farm-files",
+    StaticFiles(directory=str(storage_root())),
+    name="social-farm-files",
+)
 
 
 @app.get("/health", tags=["system"])

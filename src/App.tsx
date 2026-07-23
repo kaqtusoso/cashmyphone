@@ -20,6 +20,7 @@ const PolicyPage = lazy(() => import("./pages/PolicyPage"));
 const SellPhone = lazy(() => import("./pages/SellPhone"));
 const Checkout = lazy(() => import("./pages/Checkout"));
 const Summary = lazy(() => import("./pages/Summary"));
+const SocialFarmPage = lazy(() => import("./pages/admin/SocialFarmPage"));
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ const DeferredOverlays = ({ children }: { children: React.ReactNode }) => {
 const AppRoutes = () => {
   const location = useLocation();
   const useClaudeShell = location.pathname === "/" || location.pathname.startsWith("/salja/");
+  const isSocialFarmAdmin = location.pathname === "/admin/social-farm";
 
   useEffect(() => {
     persistCampaignParams(location.search);
@@ -55,7 +57,7 @@ const AppRoutes = () => {
 
   return (
     <div className="flex flex-col min-h-screen">
-      {!useClaudeShell && <Header />}
+      {!useClaudeShell && !isSocialFarmAdmin && <Header />}
       <div className="flex-1">
         <Suspense fallback={null}>
           <Routes>
@@ -71,12 +73,13 @@ const AppRoutes = () => {
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/checkout/:checkoutStep" element={<Checkout />} />
             <Route path="/summary" element={<Summary />} />
+            <Route path="/admin/social-farm" element={<SocialFarmPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
       </div>
-      {!useClaudeShell && <SiteFooter />}
+      {!useClaudeShell && !isSocialFarmAdmin && <SiteFooter />}
     </div>
   );
 };
