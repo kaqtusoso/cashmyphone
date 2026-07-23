@@ -1135,10 +1135,10 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
     details_html = "".join(f"<div>{detail}</div>" for detail in details)
     stars_html = "".join(
         f"""
-                      <td class="tv-star-cell" align="center" style="padding:0 5px;">
+                      <td class="tv-star-cell tv-rating-{stars}" align="center" style="padding:0 5px;">
                         <a class="tv-star" href="{escape(_feedback_rating_url(stars), quote=True)}" target="_blank" rel="noopener" title="{stars} av 5" aria-label="{stars} av 5 stjärnor" style="display:inline-block;width:50px;height:50px;line-height:50px;border-radius:50%;border:2px solid #dfe6e2;background:#f6f9f7;color:#c4cec8;text-align:center;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:26px;font-weight:700;">★</a>
                       </td>"""
-        for stars in range(1, 6)
+        for stars in range(5, 0, -1)
     )
 
     return f"""<!doctype html>
@@ -1150,9 +1150,44 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title>Hur gick det med Televera?</title>
     <style>
-      .tv-star:hover {{
-        border-color:#12b57a !important;
-        background:#12b57a !important;
+      .tv-rating-1:hover .tv-star,
+      .tv-rating-1:focus-within .tv-star,
+      .tv-rating-1:hover ~ .tv-star-cell .tv-star,
+      .tv-rating-1:focus-within ~ .tv-star-cell .tv-star {{
+        border-color:#ff3722 !important;
+        background:#ff3722 !important;
+        color:#ffffff !important;
+      }}
+      .tv-rating-2:hover .tv-star,
+      .tv-rating-2:focus-within .tv-star,
+      .tv-rating-2:hover ~ .tv-star-cell .tv-star,
+      .tv-rating-2:focus-within ~ .tv-star-cell .tv-star {{
+        border-color:#ff862f !important;
+        background:#ff862f !important;
+        color:#ffffff !important;
+      }}
+      .tv-rating-3:hover .tv-star,
+      .tv-rating-3:focus-within .tv-star,
+      .tv-rating-3:hover ~ .tv-star-cell .tv-star,
+      .tv-rating-3:focus-within ~ .tv-star-cell .tv-star {{
+        border-color:#ffce00 !important;
+        background:#ffce00 !important;
+        color:#ffffff !important;
+      }}
+      .tv-rating-4:hover .tv-star,
+      .tv-rating-4:focus-within .tv-star,
+      .tv-rating-4:hover ~ .tv-star-cell .tv-star,
+      .tv-rating-4:focus-within ~ .tv-star-cell .tv-star {{
+        border-color:#73cf11 !important;
+        background:#73cf11 !important;
+        color:#ffffff !important;
+      }}
+      .tv-rating-5:hover .tv-star,
+      .tv-rating-5:focus-within .tv-star,
+      .tv-rating-5:hover ~ .tv-star-cell .tv-star,
+      .tv-rating-5:focus-within ~ .tv-star-cell .tv-star {{
+        border-color:#00b67a !important;
+        background:#00b67a !important;
         color:#ffffff !important;
       }}
       @media only screen and (max-width:600px) {{
@@ -1184,7 +1219,7 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
                 <p style="font-size:17px;line-height:26px;color:#5b6b63;margin:14px auto 0;max-width:400px;">Nu har det gått ett par veckor sedan din beställning via Televera. Lämna gärna ett snabbt betyg – din feedback hjälper oss att bli bättre.</p>
 
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:30px auto 0;">
-                  <tr>
+                  <tr dir="rtl" style="direction:rtl;">
                     {stars_html}
                   </tr>
                 </table>
