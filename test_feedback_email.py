@@ -121,12 +121,16 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
         ):
             html = _feedback_email_html(make_row(first_name="Anna & Bo"))
 
-        self.assertIn("Hur gick det, Anna &amp; Bo?", html)
-        self.assertIn("Sätt ett betyg — det tar tre sekunder.", html)
+        self.assertIn("Vad tyckte du, Anna &amp; Bo?", html)
+        self.assertIn("Lämna gärna ett snabbt betyg", html)
         self.assertIn("https://api.example.test/mail-assets/televera-logo-full.png", html)
         self.assertEqual(html.count("aria-label="), 5)
         for stars in range(1, 6):
             self.assertIn(f"https://example.test/review?stars={stars}", html)
+        self.assertNotIn("Klicka på antal stjärnor", html)
+        self.assertNotIn("💚", html)
+        self.assertIn('class="tv-bottom-space"', html)
+        self.assertIn("border-radius:0 0 20px 20px", html)
         self.assertNotIn("<script", html)
         self.assertNotIn("<x-dc", html)
         self.assertNotIn("<sc-for", html)
@@ -147,7 +151,7 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
             FakeAsyncClient.last_headers["Idempotency-Key"],
             _feedback_email_idempotency_key(make_row()),
         )
-        self.assertIn("Hur gick det, Anna?", FakeAsyncClient.last_json["html"])
+        self.assertIn("Vad tyckte du, Anna?", FakeAsyncClient.last_json["html"])
 
 
 if __name__ == "__main__":

@@ -1095,9 +1095,9 @@ def _feedback_email_text(row: dict[str, Any]) -> str:
 
     return f"""Hej {first_name},
 
-Det har gått ungefär två veckor sedan du gjorde din beställning via Televera.
+Nu har det gått ett par veckor sedan din beställning via Televera.
 
-Vi vill gärna veta hur du upplevde tjänsten. Om du har en minut över får du gärna lämna ett omdöme på Trustpilot:
+Lämna gärna ett snabbt betyg. Din feedback hjälper oss att bli bättre:
 
 {trustpilot_url}
 {order_line}{model_line}
@@ -1124,7 +1124,7 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
         f"{settings.public_base_url.rstrip('/')}/mail-assets/televera-logo-full.png",
         quote=True,
     )
-    heading = f"Hur gick det, {first_name}?" if first_name else "Hur gick det?"
+    heading = f"Vad tyckte du, {first_name}?" if first_name else "Vad tyckte du?"
     details = []
     if order_id:
         details.append(
@@ -1156,7 +1156,8 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
         color:#ffffff !important;
       }}
       @media only screen and (max-width:600px) {{
-        .tv-shell {{ padding:24px 10px !important; }}
+        .tv-shell {{ padding:24px 10px 0 !important; }}
+        .tv-bottom-space {{ height:24px !important;line-height:24px !important; }}
         .tv-content {{ padding-left:22px !important;padding-right:22px !important; }}
         .tv-heading {{ font-size:28px !important;line-height:32px !important; }}
         .tv-star {{ width:42px !important;height:42px !important;line-height:42px !important;font-size:23px !important; }}
@@ -1170,36 +1171,38 @@ def _feedback_email_html(row: dict[str, Any]) -> str:
     </div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#eef1ef;margin:0;">
       <tr>
-        <td class="tv-shell" align="center" style="padding:48px 20px;">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:560px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 12px 40px rgba(16,90,60,0.12);">
+        <td class="tv-shell" align="center" style="padding:48px 20px 0;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:560px;background:transparent;box-shadow:0 12px 40px rgba(16,90,60,0.12);">
             <tr>
-              <td align="center" style="background:#12b57a;padding:26px 34px;">
+              <td align="center" style="background:#12b57a;padding:26px 34px;border-radius:20px 20px 0 0;">
                 <img src="{logo_url}" width="150" alt="Televera" style="display:block;width:150px;max-width:150px;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none;color:#ffffff;font-size:24px;font-weight:800;">
               </td>
             </tr>
             <tr>
-              <td class="tv-content" align="center" style="padding:40px 40px 34px;text-align:center;">
+              <td class="tv-content" align="center" style="background:#ffffff;padding:40px 40px 34px;text-align:center;">
                 <h1 class="tv-heading" style="margin:0;font-family:'Arial Rounded MT Bold','Trebuchet MS',Arial,sans-serif;font-weight:800;font-size:32px;line-height:35px;color:#16241d;">{heading}</h1>
-                <p style="font-size:17px;line-height:26px;color:#5b6b63;margin:14px auto 0;max-width:380px;">Det har gått ungefär två veckor sedan din beställning via Televera. Sätt ett betyg — det tar tre sekunder.</p>
+                <p style="font-size:17px;line-height:26px;color:#5b6b63;margin:14px auto 0;max-width:400px;">Nu har det gått ett par veckor sedan din beställning via Televera. Lämna gärna ett snabbt betyg – din feedback hjälper oss att bli bättre.</p>
 
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:30px auto 10px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:30px auto 0;">
                   <tr>
                     {stars_html}
                   </tr>
                 </table>
-                <div style="font-size:14px;line-height:20px;color:#9aa8a1;margin:0;">Klicka på antal stjärnor så tar vi dig till Trustpilot</div>
               </td>
             </tr>
             <tr>
-              <td class="tv-content" style="border-top:1px solid #eaefec;padding:22px 40px 30px;">
+              <td class="tv-content" style="background:#ffffff;border-top:1px solid #eaefec;padding:22px 40px 30px;border-radius:0 0 20px 20px;">
                 <div style="font-size:13px;line-height:22px;color:#8a988f;">
                 {details_html}
                 </div>
-                <p style="font-size:13px;line-height:20px;color:#aab5ae;margin:16px 0 0;">Tack för att du hjälper oss att göra Televera bättre. 💚</p>
+                <p style="font-size:13px;line-height:20px;color:#aab5ae;margin:16px 0 0;">Tack för att du hjälper oss att göra Televera bättre.</p>
               </td>
             </tr>
           </table>
         </td>
+      </tr>
+      <tr>
+        <td class="tv-bottom-space" height="48" style="height:48px;line-height:48px;font-size:1px;background:#eef1ef;">&nbsp;</td>
       </tr>
     </table>
   </body>
