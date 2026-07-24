@@ -214,6 +214,16 @@ const SocialFarmPage = () => {
     });
   };
 
+  const refreshCopy = () => {
+    if (!selectedPost) return Promise.resolve();
+    return runAction("refresh-copy", async () => {
+      const response = await apiFetch(`/api/social-farm/posts/${selectedPost.id}/refresh-copy`, {
+        method: "POST",
+      });
+      replacePost((await response.json()) as FarmPost);
+    });
+  };
+
   const downloadZip = () => {
     if (!selectedPost) return Promise.resolve();
     return runAction("download", async () => {
@@ -354,6 +364,15 @@ const SocialFarmPage = () => {
                   <h2>{selectedPost.title}</h2>
                 </div>
                 <div className="sf-header-actions">
+                  <button
+                    type="button"
+                    onClick={() => void refreshCopy()}
+                    disabled={Boolean(action)}
+                    title="Ersätt texten med den senaste svenska textmallen"
+                  >
+                    {action === "refresh-copy" ? <Loader2 className="sf-spin" /> : <RefreshCw />}
+                    Uppdatera text
+                  </button>
                   <button type="button" onClick={() => void downloadZip()} disabled={Boolean(action)}>
                     {action === "download" ? <Loader2 className="sf-spin" /> : <Download />}
                     ZIP

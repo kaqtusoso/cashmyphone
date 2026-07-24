@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from .copybook import NATURAL_COPY
+
 
 @dataclass(frozen=True)
 class SlideBlueprint:
@@ -544,3 +546,34 @@ TOPICS: tuple[TopicBlueprint, ...] = (
         ),
     ),
 )
+
+
+def _apply_natural_copy(topic: TopicBlueprint) -> TopicBlueprint:
+    copy = NATURAL_COPY.get(topic.key)
+    if not copy:
+        raise RuntimeError(f"Natural copy saknas för ämnet {topic.key}")
+
+    slide_copy = copy["slides"]
+    if not isinstance(slide_copy, tuple) or len(slide_copy) != len(topic.slides):
+        raise RuntimeError(f"Fel antal copy-slides för ämnet {topic.key}")
+
+    slides = tuple(
+        SlideBlueprint(
+            heading=heading,
+            body=body,
+            scene=visual.scene,
+            visual_type=visual.visual_type,
+        )
+        for visual, (heading, body) in zip(topic.slides, slide_copy)
+    )
+    return TopicBlueprint(
+        key=topic.key,
+        category=topic.category,
+        title=str(copy["title"]),
+        caption=str(copy["caption"]),
+        cta=str(copy["cta"]),
+        slides=slides,
+    )
+
+
+TOPICS = tuple(_apply_natural_copy(topic) for topic in TOPICS)

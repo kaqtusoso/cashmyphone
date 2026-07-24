@@ -117,7 +117,14 @@ Hårda regler:
 - Televera är en jämförelsetjänst, inte köparen.
 - Skriv "jämför bud", aldrig "garanterat högsta pris".
 - Hitta inte på kundhistorier, prisbelopp, resultat eller tidsvinster.
-- Tonen är lugn, personlig och konkret; inga AI-klingande introfraser.
+- Skriv som en riktig svensk person som berättar för en kompis: kort, konkret och vardagligt.
+- Undvik abstrakta AI-formuleringar som "gav mig överblick", "fick ett sammanhang",
+  "det jag egentligen sparade", "helheten", "i lugn och ro" och "utan stress".
+- Exakt en av de fem innehållsslidesen ska nämna Televera naturligt och förklara
+  nyttan: att flera uppköpares bud kan jämföras på samma ställe.
+- Övriga fyra innehållsslides får inte nämna Televera.
+- CTA:n ska innehålla televera.se och vara konkret och lågmäld. Gör tydligt att
+  läsaren kan jämföra utan att lova att sälja.
 - Cover: högst 72 tecken.
 - Varje innehållsrubrik: högst 58 tecken.
 - Varje innehållsslide har exakt två textblock, högst 105 tecken vardera.
@@ -151,9 +158,21 @@ def _validate_generated_copy(payload: dict[str, Any], topic: TopicBlueprint) -> 
     slides = payload.get("slides")
     if not isinstance(slides, list) or len(slides) != 5:
         raise ValueError("Copy-svaret måste innehålla exakt fem innehållsslides")
+    title = str(payload.get("title") or topic.title).strip()
+    if validate_copy("cover", title, []):
+        raise ValueError("Cover-texten klarar inte längdkraven")
     normalized_slides: list[dict[str, Any]] = []
     person_count = 0
     allowed_visuals = {"object", "room", "person_far", "interface"}
+    televera_slide_count = 0
+    banned_phrases = (
+        "gav mig överblick",
+        "fick ett sammanhang",
+        "det jag egentligen sparade",
+        "helhetsbedömningen",
+        "i lugn och ro",
+        "utan stress",
+    )
     for index, slide in enumerate(slides):
         heading = str(slide.get("heading", "")).strip()
         body = slide.get("body")
@@ -161,24 +180,37 @@ def _validate_generated_copy(payload: dict[str, Any], topic: TopicBlueprint) -> 
         visual_type = str(slide.get("visual_type", "object")).strip()
         if not heading or not scene or not isinstance(body, list) or len(body) != 2:
             raise ValueError(f"Ogiltig struktur på slide {index + 1}")
+        normalized_body = [str(value).strip() for value in body]
+        if validate_copy("body", heading, normalized_body):
+            raise ValueError(f"Slide {index + 1} klarar inte längdkraven")
         if visual_type not in allowed_visuals:
             visual_type = "object"
         if visual_type == "person_far":
             person_count += 1
             if person_count > 2:
                 visual_type = "room"
+        slide_text = " ".join([heading, *normalized_body]).lower()
+        if any(phrase in slide_text for phrase in banned_phrases):
+            raise ValueError(f"Slide {index + 1} innehåller AI-klingande standardspråk")
+        if "televera" in slide_text:
+            televera_slide_count += 1
         normalized_slides.append(
             {
                 "heading": heading,
-                "body": [str(value).strip() for value in body],
+                "body": normalized_body,
                 "scene": scene,
                 "visual_type": visual_type,
             }
         )
+    if televera_slide_count != 1:
+        raise ValueError("Exakt en innehållsslide måste nämna Televera")
+    cta = str(payload.get("cta") or topic.cta).strip()
+    if "televera.se" not in cta.lower():
+        raise ValueError("CTA:n måste innehålla televera.se")
     return {
-        "title": str(payload.get("title") or topic.title).strip(),
+        "title": title,
         "caption": str(payload.get("caption") or topic.caption).strip(),
-        "cta": str(payload.get("cta") or topic.cta).strip(),
+        "cta": cta,
         "slides": normalized_slides,
     }
 
@@ -453,6 +485,76 @@ async def update_slide(
     await db.commit()
     await db.refresh(slide)
     return slide
+
+
+async def refresh_post_copy(
+    db: AsyncSession,
+    *,
+    post: SocialFarmPost,
+) -> SocialFarmPost:
+    """Apply the current curated copy to an existing draft and re-render it."""
+    topic = next((candidate for candidate in TOPICS if candidate.key == post.topic_key), None)
+    if not topic:
+        raise ValueError(f"Okänt ämne: {post.topic_key}")
+
+    slides = await get_slides(db, post.id)
+    if len(slides) != 6:
+        raise ValueError("Utkastet måste innehålla exakt sex slides")
+
+    payloads = [
+        {
+            "heading": topic.title,
+            "body": [],
+            "scene": slides[0].scene_prompt,
+            "visual_type": slides[0].visual_type,
+        },
+        *[
+            {
+                "heading": blueprint.heading,
+                "body": list(blueprint.body),
+                "scene": blueprint.scene,
+                "visual_type": blueprint.visual_type,
+            }
+            for blueprint in topic.slides
+        ],
+    ]
+
+    post.title = topic.title
+    post.caption = topic.caption
+    post.cta = topic.cta
+    post.copy_provider = "curated"
+    post.status = "needs_review"
+    post.approved_at = None
+    post.updated_at = datetime.utcnow()
+
+    post_warnings: list[str] = []
+    for slide, payload in zip(slides, payloads):
+        slide.heading = payload["heading"]
+        slide.body_json = json.dumps(payload["body"], ensure_ascii=False)
+        slide.scene_prompt = payload["scene"]
+        slide.visual_type = payload["visual_type"]
+        warnings = validate_copy(slide.kind, slide.heading, payload["body"])
+        if not slide.render_path:
+            raise RuntimeError("Sliden saknar renderingsfil")
+        warnings += render_slide(
+            output_path=Path(slide.render_path),
+            position=slide.position,
+            kind=slide.kind,
+            heading=slide.heading,
+            body=payload["body"],
+            visual_type=slide.visual_type,
+            background_path=slide.background_path,
+        )
+        slide.quality_warnings_json = json.dumps(warnings, ensure_ascii=False)
+        post_warnings.extend(warnings)
+
+    post.quality_warnings_json = json.dumps(
+        list(dict.fromkeys(post_warnings)),
+        ensure_ascii=False,
+    )
+    await db.commit()
+    await db.refresh(post)
+    return post
 
 
 async def regenerate_slide_background(

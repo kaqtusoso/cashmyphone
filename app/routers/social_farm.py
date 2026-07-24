@@ -16,6 +16,7 @@ from ..social_farm.service import (
     create_post_export,
     get_post,
     list_posts,
+    refresh_post_copy,
     regenerate_slide_background,
     scheduled_generation,
     serialize_post,
@@ -108,6 +109,18 @@ async def approve(post_id: int, db: AsyncSession = Depends(get_db)):
     post.approved_at = datetime.utcnow()
     await db.commit()
     await db.refresh(post)
+    return await serialize_post(db, post)
+
+
+@router.post("/posts/{post_id}/refresh-copy", dependencies=[Depends(require_admin_key)])
+async def refresh_copy(post_id: int, db: AsyncSession = Depends(get_db)):
+    post = await get_post(db, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Utkastet hittades inte")
+    try:
+        await refresh_post_copy(db, post=post)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await serialize_post(db, post)
 
 
