@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     trustpilot_review_url: str = ""
     feedback_email_enabled: bool = False
     feedback_email_start_date: str = ""
+    feedback_email_start_order_id: str = ""
     feedback_email_delay_days: int = 14
     feedback_email_cron_hour: int = 9
     feedback_email_cron_minute: int = 15

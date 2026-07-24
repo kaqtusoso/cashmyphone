@@ -32,6 +32,7 @@ ORDER_SUBMISSION_TIMEOUT_SECONDS=10
 # Trustpilot-feedback 14 dagar efter order. Kräver Google Sheets API.
 FEEDBACK_EMAIL_ENABLED=false
 FEEDBACK_EMAIL_START_DATE=2026-07-23
+FEEDBACK_EMAIL_START_ORDER_ID=
 TRUSTPILOT_REVIEW_URL=https://se.trustpilot.com/evaluate/televera.se
 FEEDBACK_EMAIL_DELAY_DAYS=14
 FEEDBACK_EMAIL_CRON_HOUR=9
@@ -68,9 +69,13 @@ Security: STARTTLS
 
 När `FEEDBACK_EMAIL_ENABLED=true` kör backend ett dagligt jobb som läser
 `Orders`-fliken och skickar ett neutralt Trustpilot-mail till kunder vars order
-är minst `FEEDBACK_EMAIL_DELAY_DAYS` gammal. `FEEDBACK_EMAIL_START_DATE`
-begränsar automatiseringen till order lagda från och med aktiveringsdatumet, så
-att äldre kunder inte får oväntade retroaktiva utskick.
+är minst `FEEDBACK_EMAIL_DELAY_DAYS` gammal.
+
+Sätt `FEEDBACK_EMAIL_START_ORDER_ID` för att börja exakt vid en viss orderrad
+och inkludera alla efterföljande rader i `Orders`. När variabeln är satt har den
+företräde framför `FEEDBACK_EMAIL_START_DATE`. Om startordern inte hittas stoppas
+jobbet utan utskick. Startdatumet finns kvar som fallback när inget order-ID är
+konfigurerat.
 
 Jobbet markerar varje orderrad med:
 

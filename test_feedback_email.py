@@ -9,6 +9,7 @@ from app.routers.orders import (
     _feedback_candidate_is_due,
     _feedback_email_html,
     _feedback_email_idempotency_key,
+    _feedback_rows_from_start_order,
     _feedback_sheet_rows,
     _feedback_status_rows,
     _send_feedback_email_resend,
@@ -130,6 +131,53 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(
                 _feedback_candidate_is_due(make_row(created_at="2026-07-22 23:59"), now)
             )
+
+    def test_start_order_id_takes_precedence_over_start_date(self):
+        now = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
+        with (
+            patch("app.routers.orders.settings.feedback_email_delay_days", 14),
+            patch("app.routers.orders.settings.feedback_email_start_date", "2026-07-24"),
+            patch(
+                "app.routers.orders.settings.feedback_email_start_order_id",
+                "TLV-TEST123",
+            ),
+        ):
+            self.assertTrue(
+                _feedback_candidate_is_due(
+                    make_row(created_at="2026-07-23 12:00"),
+                    now,
+                )
+            )
+
+    def test_rows_begin_at_exact_start_order(self):
+        rows = [
+            make_row(order_id="TLV-BEFORE"),
+            make_row(order_id="TLV-020A6104AB"),
+            make_row(order_id="TLV-AFTER"),
+        ]
+        with patch(
+            "app.routers.orders.settings.feedback_email_start_order_id",
+            "tlv-020a6104ab",
+        ):
+            selected, found = _feedback_rows_from_start_order(rows)
+
+        self.assertTrue(found)
+        self.assertEqual(
+            [row["order_id"] for row in selected],
+            ["TLV-020A6104AB", "TLV-AFTER"],
+        )
+
+    def test_missing_start_order_fails_closed(self):
+        with patch(
+            "app.routers.orders.settings.feedback_email_start_order_id",
+            "TLV-MISSING",
+        ):
+            selected, found = _feedback_rows_from_start_order(
+                [make_row(order_id="TLV-OTHER")]
+            )
+
+        self.assertFalse(found)
+        self.assertEqual(selected, [])
 
     def test_sent_and_in_progress_rows_are_not_selected_again(self):
         now = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)

@@ -1590,9 +1590,13 @@ def _feedback_email_is_configured() -> bool:
     from_email = settings.smtp_from_email or settings.order_email_from
     resend_configured = bool(_resend_api_key() and from_email)
     smtp_configured = bool(settings.smtp_host and settings.smtp_username and settings.smtp_password and from_email)
+    start_configured = bool(
+        settings.feedback_email_start_order_id.strip()
+        or settings.feedback_email_start_date.strip()
+    )
     return bool(
         settings.feedback_email_enabled
-        and settings.feedback_email_start_date.strip()
+        and start_configured
         and settings.trustpilot_review_url.strip()
         and (resend_configured or smtp_configured)
     )
@@ -1614,11 +1618,29 @@ def _feedback_candidate_is_due(row: dict[str, Any], now: datetime) -> bool:
         return False
 
     created_at = _parse_feedback_order_datetime(_feedback_row_value(row, "created_at"))
-    start_at = _parse_feedback_order_datetime(settings.feedback_email_start_date)
-    if not created_at or not start_at or created_at < start_at:
+    if not created_at:
         return False
 
+    if not settings.feedback_email_start_order_id.strip():
+        start_at = _parse_feedback_order_datetime(settings.feedback_email_start_date)
+        if not start_at or created_at < start_at:
+            return False
+
     return created_at <= now - timedelta(days=settings.feedback_email_delay_days)
+
+
+def _feedback_rows_from_start_order(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], bool]:
+    start_order_id = settings.feedback_email_start_order_id.strip().upper()
+    if not start_order_id:
+        return rows, True
+
+    for index, row in enumerate(rows):
+        if _feedback_row_value(row, "order_id").upper() == start_order_id:
+            return rows[index:], True
+
+    return [], False
 
 
 async def _update_feedback_email_sheet_status(
@@ -1651,7 +1673,7 @@ async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
         return IntegrationStatus(
             configured=False,
             ok=True,
-            message="Feedbackmail är inte aktiverat eller saknar startdatum, Trustpilot-länk eller mailinställningar.",
+            message="Feedbackmail är inte aktiverat eller saknar startspärr, Trustpilot-länk eller mailinställningar.",
         )
     if not settings.google_service_account_json or not settings.google_sheets_spreadsheet_id:
         return IntegrationStatus(
@@ -1692,10 +1714,29 @@ async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
             )
 
             source_headers = values[0]
-            rows: list[tuple[int, dict[str, Any]]] = []
+            order_rows: list[dict[str, Any]] = []
             for raw_row in values[1:]:
                 normalized = _normalize_existing_sheet_row(source_headers, raw_row)
-                row = {key: normalized[index] if index < len(normalized) else "" for index, key in enumerate(SHEET_KEYS)}
+                order_rows.append(
+                    {
+                        key: normalized[index] if index < len(normalized) else ""
+                        for index, key in enumerate(SHEET_KEYS)
+                    }
+                )
+
+            order_rows, start_order_found = _feedback_rows_from_start_order(
+                order_rows
+            )
+            if not start_order_found:
+                start_order_id = settings.feedback_email_start_order_id.strip()
+                return IntegrationStatus(
+                    configured=True,
+                    ok=False,
+                    message=f"Startordern {start_order_id} hittades inte; inga feedbackmail skickades.",
+                )
+
+            rows: list[tuple[int, dict[str, Any]]] = []
+            for row in order_rows:
                 order_id = _feedback_row_value(row, "order_id")
                 feedback_status = feedback_statuses.get(order_id, {})
                 for key in FEEDBACK_SHEET_KEYS[1:]:
