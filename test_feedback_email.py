@@ -116,6 +116,7 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.routers.orders.settings.feedback_email_delay_days", 14),
             patch("app.routers.orders.settings.feedback_email_start_date", "2026-07-23"),
+            patch("app.routers.orders.settings.feedback_email_start_order_id", ""),
         ):
             self.assertTrue(_feedback_candidate_is_due(make_row(), now))
             self.assertFalse(
@@ -127,6 +128,7 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.routers.orders.settings.feedback_email_delay_days", 14),
             patch("app.routers.orders.settings.feedback_email_start_date", "2026-07-23"),
+            patch("app.routers.orders.settings.feedback_email_start_order_id", ""),
         ):
             self.assertFalse(
                 _feedback_candidate_is_due(make_row(created_at="2026-07-22 23:59"), now)
@@ -184,6 +186,7 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.routers.orders.settings.feedback_email_delay_days", 14),
             patch("app.routers.orders.settings.feedback_email_start_date", "2026-07-23"),
+            patch("app.routers.orders.settings.feedback_email_start_order_id", ""),
         ):
             self.assertFalse(
                 _feedback_candidate_is_due(
