@@ -278,6 +278,7 @@ export const fetchQuotes = async (
       retailer: string;
       condition_key: string;
       price_sek: number;
+      price_max_sek?: number | null;
       url: string | null;
       scraped_at?: string;
     }[]
@@ -298,6 +299,8 @@ export const fetchQuotes = async (
       lagring: storage,
       skick: q.condition_key,
       pris: q.price_sek,
+      prisMax: q.price_max_sek ?? undefined,
+      uppskattatIntervall: q.price_max_sek !== null && q.price_max_sek !== undefined && q.price_max_sek > q.price_sek,
       url: q.url ?? "#",
       leverans: info.leverans,
       utbetalningstid: info.utbetalningstid,

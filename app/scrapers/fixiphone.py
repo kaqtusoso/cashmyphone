@@ -75,6 +75,43 @@ def _lower_bound_price(base_price: int, deduction: int) -> int:
     return max(0, int(price))
 
 
+def _upper_bound_price(base_price: int, deduction: int) -> int:
+    price = base_price - ((base_price * deduction) // 100)
+    return max(0, int(price))
+
+
+def _deduction_from_condition(condition: str) -> Optional[int]:
+    match = re.fullmatch(r"d(\d+)", condition or "", re.I)
+    if not match:
+        return None
+    deduction = int(match.group(1))
+    return deduction if deduction in ALL_DEDUCTIONS else None
+
+
+def _base_prices_from_html(html: str) -> List[Dict[str, Any]]:
+    soup = BeautifulSoup(html, "lxml")
+    cards = soup.select(".popupInformation .pro-details")
+    prices: List[Dict[str, Any]] = []
+
+    for card in cards:
+        model_input = card.select_one('input[name="product-name"]')
+        model_name = _clean_model(model_input.get("value", "") if model_input else "")
+        if not model_name.startswith("iPhone"):
+            continue
+
+        for button in card.select(".product-price"):
+            base_price = int(button.get("data-price") or 0)
+            storage_gb = _parse_storage(button.get_text(" ", strip=True))
+            if base_price and storage_gb:
+                prices.append({
+                    "model": model_name,
+                    "storage_gb": storage_gb,
+                    "base_price_sek": base_price,
+                })
+
+    return prices
+
+
 class FixiphoneScraper(BaseScraper):
     retailer_id = "fixiphone"
     retailer_name = "Fixiphone"
@@ -91,30 +128,51 @@ class FixiphoneScraper(BaseScraper):
             resp = await client.get(SELL_URL)
             resp.raise_for_status()
 
-        soup = BeautifulSoup(resp.text, "lxml")
-        cards = soup.select(".popupInformation .pro-details")
-
         prices: List[Dict[str, Any]] = []
-        for card in cards:
-            model_input = card.select_one('input[name="product-name"]')
-            model_name = _clean_model(model_input.get("value", "") if model_input else "")
-            if not model_name.startswith("iPhone"):
-                continue
-
-            for button in card.select(".product-price"):
-                base_price = int(button.get("data-price") or 0)
-                storage_gb = _parse_storage(button.get_text(" ", strip=True))
-                if not base_price or not storage_gb:
-                    continue
-
-                for deduction in ALL_DEDUCTIONS:
-                    prices.append({
-                        "model": model_name,
-                        "storage_gb": storage_gb,
-                        "condition": f"d{deduction}",
-                        "price_sek": _lower_bound_price(base_price, deduction),
-                        "url": SELL_URL,
-                    })
+        for base in _base_prices_from_html(resp.text):
+            for deduction in ALL_DEDUCTIONS:
+                prices.append({
+                    "model": base["model"],
+                    "storage_gb": base["storage_gb"],
+                    "condition": f"d{deduction}",
+                    "price_sek": _lower_bound_price(
+                        base["base_price_sek"],
+                        deduction,
+                    ),
+                    "url": SELL_URL,
+                })
 
         logger.info(f"Fixiphone: {len(prices)} priser")
         return prices
+
+    async def fetch_live_quote(
+        self,
+        model: str,
+        storage_gb: int,
+        condition: str,
+    ) -> Optional[Dict[str, int]]:
+        """Hämta Fixiphones aktuella uppskattningsintervall för en enhet."""
+        deduction = _deduction_from_condition(condition)
+        if deduction is None:
+            return None
+
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            follow_redirects=True,
+            headers=HEADERS,
+        ) as client:
+            resp = await client.get(SELL_URL)
+            resp.raise_for_status()
+
+        normalized_model = _clean_model(model).lower()
+        for base in _base_prices_from_html(resp.text):
+            if (
+                base["model"].lower() == normalized_model
+                and base["storage_gb"] == storage_gb
+            ):
+                base_price = base["base_price_sek"]
+                return {
+                    "price_sek": _lower_bound_price(base_price, deduction),
+                    "price_max_sek": _upper_bound_price(base_price, deduction),
+                }
+        return None

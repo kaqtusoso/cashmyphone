@@ -73,9 +73,24 @@ const Rating = ({ rating, dark = false }: { rating?: string; dark?: boolean }) =
 
 const prettyScore = (rating?: string) => rating?.replace(".", ",") ?? "-";
 const paymentMethods = (offer: CompanyOffer) => (offer.paymentMethods?.length ? offer.paymentMethods : ["Banköverföring"]);
+const hasEstimatedRange = (offer: CompanyOffer) =>
+  Boolean(offer.uppskattatIntervall && offer.prisMax && offer.prisMax > offer.pris);
+const offerPriceText = (offer: CompanyOffer) =>
+  hasEstimatedRange(offer) ? `${fmt(offer.pris)}–${fmt(offer.prisMax!)}` : fmt(offer.pris);
 const paypalFee = (priceSek: number) => (priceSek >= 5000 ? 100 : Math.round(priceSek * 0.02));
 const payoutAmount = (offer: CompanyOffer, payment: PaymentMethod | null, shippingFeeSek = 0) =>
   Math.max(0, offer.pris - (payment === "paypal" ? paypalFee(offer.pris) : 0) - shippingFeeSek);
+const payoutMaximum = (offer: CompanyOffer, payment: PaymentMethod | null, shippingFeeSek = 0) => {
+  const maximum = offer.prisMax ?? offer.pris;
+  return Math.max(0, maximum - (payment === "paypal" ? paypalFee(maximum) : 0) - shippingFeeSek);
+};
+const payoutText = (offer: CompanyOffer, payment: PaymentMethod | null, shippingFeeSek = 0) => {
+  const minimum = payoutAmount(offer, payment, shippingFeeSek);
+  const maximum = payoutMaximum(offer, payment, shippingFeeSek);
+  return hasEstimatedRange(offer) && maximum > minimum
+    ? `${fmt(minimum)}–${fmt(maximum)}`
+    : fmt(minimum);
+};
 const methodId = (method: string): PaymentMethod => {
   const normalized = method.toLowerCase();
   if (normalized.includes("swish")) return "swish";
@@ -176,17 +191,22 @@ const StepDots = ({ step }: { step: number }) => {
 };
 
 const PayoutMini = ({ offer, model, storage, payment, shippingFeeSek = 0 }: { offer: CompanyOffer; model: string; storage: string; payment?: PaymentMethod | null; shippingFeeSek?: number }) => (
-  <section className="cmp-mcommerce-payout">
-    <div className="cmp-mcommerce-payout-info">
-      <h2>{offer.företag}</h2>
-      <span>{model} · {storage}</span>
-      <TrustpilotBadge offer={offer} />
-    </div>
-    <div className="cmp-mcommerce-payout-price">
-      <small>DU FÅR</small>
-      <span><strong>{fmt(payoutAmount(offer, payment ?? null, shippingFeeSek))}<Squiggle /></strong><em>SEK</em></span>
-    </div>
-  </section>
+  <>
+    <section className="cmp-mcommerce-payout">
+      <div className="cmp-mcommerce-payout-info">
+        <h2>{offer.företag}</h2>
+        <span>{model} · {storage}</span>
+        <TrustpilotBadge offer={offer} />
+      </div>
+      <div className="cmp-mcommerce-payout-price">
+        <small>{hasEstimatedRange(offer) ? "UPPSKATTNING" : "DU FÅR"}</small>
+        <span><strong>{payoutText(offer, payment ?? null, shippingFeeSek)}<Squiggle /></strong><em>SEK</em></span>
+      </div>
+    </section>
+    {hasEstimatedRange(offer) ? (
+      <p className="cmp-mcommerce-range-note">Slutpriset fastställs av {offer.företag} efter kontroll av mobilen.</p>
+    ) : null}
+  </>
 );
 
 const FeeTrail = ({ amount, label = "avgifter" }: { amount: number; label?: string }) => (
@@ -561,8 +581,8 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
                 <TrustpilotBadge offer={best} />
               </div>
               <div className="cmp-mcommerce-winner-price">
-                <small>DU FÅR</small>
-                <strong>{fmt(best.pris)}<Squiggle /></strong>
+                <small>{hasEstimatedRange(best) ? "UPPSKATTNING" : "DU FÅR"}</small>
+                <strong>{offerPriceText(best)}<Squiggle /></strong>
                 <em>SEK</em>
               </div>
             </div>
@@ -584,8 +604,10 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
                     </div>
                   </div>
                   <div>
-                    <strong>{fmt(offer.pris)} kr</strong>
-                    <span className={diff === 0 ? "low" : undefined}>{diff > 0 ? `+${fmt(diff)} kr` : "lägsta bud"}</span>
+                    <strong>{offerPriceText(offer)} kr</strong>
+                    <span className={diff === 0 ? "low" : undefined}>
+                      {hasEstimatedRange(offer) ? "uppskattat intervall" : diff > 0 ? `+${fmt(diff)} kr` : "lägsta bud"}
+                    </span>
                   </div>
                   <button type="button" onClick={() => beginCheckout(offer)}>
                     Sälj
@@ -791,7 +813,8 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
       ["Betalning", paymentLabel],
       ...(shippingFeeSek ? [["Fraktavgift", `-${fmt(shippingFeeSek)} kr`]] : []),
       ...(payment === "paypal" ? [["PayPal-avgift", `-${fmt(paypalFee(activeOffer.pris))} kr`]] : []),
-      ["Du får", `${fmt(payoutAmount(activeOffer, payment, shippingFeeSek))} kr`],
+      [hasEstimatedRange(activeOffer) ? "Uppskattning" : "Du får", `${payoutText(activeOffer, payment, shippingFeeSek)} kr`],
+      ...(hasEstimatedRange(activeOffer) ? [["Prisstatus", "Slutpris efter kontroll"]] : []),
       ["Namn", `${form.firstName} ${form.lastName}`],
       ["Adress", `${form.address}, ${form.postalCode} ${form.city}`],
     ];
@@ -858,14 +881,14 @@ const MobileCommerceFlow = ({ offers, model, storage, color, conditionAnswers, o
             {payment === "paypal" ? <div><dt>PayPal-avgift</dt><dd>-{fmt(paypalFee(activeOffer.pris))} kr</dd></div> : null}
             <div><dt>Beräknad utbetalning</dt><dd>4–5 dagar</dd></div>
           </dl>
-          <footer><span>Du får utbetalt</span><strong>{fmt(payoutAmount(activeOffer, payment, shippingFeeSek))} kr<Squiggle /></strong></footer>
+          <footer><span>{hasEstimatedRange(activeOffer) ? "Uppskattad utbetalning" : "Du får utbetalt"}</span><strong>{payoutText(activeOffer, payment, shippingFeeSek)} kr<Squiggle /></strong></footer>
         </section>
         <section className="cmp-mcommerce-timeline">
           {[
             { state: "done", title: "Bekräftelse", text: `Skickas till ${form.email} med dina orderuppgifter.`, icon: Mail },
             { state: "now", title: "Skicka enheten", text: "Packa mobilen och lämna paketet enligt fraktinstruktionerna.", icon: Package },
             { state: "todo", title: `${activeOffer.företag} granskar`, text: "1–2 arbetsdagar efter att paketet kommit fram. Du får besked via e-post.", icon: Shield },
-            { state: "todo", title: "Pengarna kommer", text: `${fmt(payoutAmount(activeOffer, payment, shippingFeeSek))} kr betalas ut via ${paymentLabel}, 4–5 dagar efter godkänd granskning.`, icon: WalletCards },
+            { state: "todo", title: "Pengarna kommer", text: `${payoutText(activeOffer, payment, shippingFeeSek)} kr är den uppskattade utbetalningen via ${paymentLabel}, efter godkänd granskning.`, icon: WalletCards },
           ].map(({ state, title, text, icon: Icon }, index) => (
             <div key={title} className={state}>
               <span><Icon aria-hidden /></span>

@@ -57,9 +57,24 @@ const Rating = ({ rating, dark = false }: { rating?: string; dark?: boolean }) =
 
 const prettyScore = (rating?: string) => rating?.replace(".", ",") ?? "-";
 const paymentMethods = (offer: CompanyOffer) => (offer.paymentMethods?.length ? offer.paymentMethods : ["Banköverföring"]);
+const hasEstimatedRange = (offer: CompanyOffer) =>
+  Boolean(offer.uppskattatIntervall && offer.prisMax && offer.prisMax > offer.pris);
+const offerPriceText = (offer: CompanyOffer) =>
+  hasEstimatedRange(offer) ? `${fmt(offer.pris)}–${fmt(offer.prisMax!)}` : fmt(offer.pris);
 const paypalFee = (priceSek: number) => (priceSek >= 5000 ? 100 : Math.round(priceSek * 0.02));
 const payoutAmount = (offer: CompanyOffer, payment: PaymentMethod | null, shippingFeeSek = 0) =>
   Math.max(0, offer.pris - (payment === "paypal" ? paypalFee(offer.pris) : 0) - shippingFeeSek);
+const payoutMaximum = (offer: CompanyOffer, payment: PaymentMethod | null, shippingFeeSek = 0) => {
+  const maximum = offer.prisMax ?? offer.pris;
+  return Math.max(0, maximum - (payment === "paypal" ? paypalFee(maximum) : 0) - shippingFeeSek);
+};
+const payoutText = (offer: CompanyOffer, payment: PaymentMethod | null, shippingFeeSek = 0) => {
+  const minimum = payoutAmount(offer, payment, shippingFeeSek);
+  const maximum = payoutMaximum(offer, payment, shippingFeeSek);
+  return hasEstimatedRange(offer) && maximum > minimum
+    ? `${fmt(minimum)}–${fmt(maximum)}`
+    : fmt(minimum);
+};
 const methodId = (method: string): PaymentMethod => {
   const normalized = method.toLowerCase();
   if (normalized.includes("swish")) return "swish";
@@ -158,10 +173,13 @@ const PayoutHero = ({ offer, model, storage, payment, shippingFeeSek = 0, note }
         <span>{model} · {storage}</span>
       </div>
       <div className="cmp-commerce-payout-price">
-        <small>DU FÅR</small>
-        <span><strong>{fmt(payoutAmount(offer, payment ?? null, shippingFeeSek))}<Squiggle /></strong><em>SEK</em></span>
+        <small>{hasEstimatedRange(offer) ? "UPPSKATTNING" : "DU FÅR"}</small>
+        <span><strong>{payoutText(offer, payment ?? null, shippingFeeSek)}<Squiggle /></strong><em>SEK</em></span>
       </div>
     </section>
+    {hasEstimatedRange(offer) ? (
+      <p className="cmp-commerce-note">Slutpriset fastställs av {offer.företag} efter att mobilen har kontrollerats.</p>
+    ) : null}
   </>
 );
 
@@ -298,7 +316,7 @@ const Timeline = ({ offer, email, paymentLabel, payment, shippingFeeSek }: { off
     { state: "done", title: "Bekräftelse", text: `Skickas till ${email || "din e-post"} med dina orderuppgifter.`, icon: Mail },
     { state: "now", title: "Skicka enheten", text: "Packa mobilen och lämna paketet enligt fraktinstruktionerna.", icon: Package },
     { state: "todo", title: "Din mobil granskas", text: `${offer.företag} kontrollerar skicket på din mobil efter att de har tagit emot paketet.`, icon: Shield },
-    { state: "todo", title: "Pengarna kommer", text: `${fmt(payoutAmount(offer, payment, shippingFeeSek))} SEK betalas ut via ${paymentLabel} efter godkänd granskning.`, icon: WalletCards },
+    { state: "todo", title: "Pengarna kommer", text: `${payoutText(offer, payment, shippingFeeSek)} SEK är den uppskattade utbetalningen via ${paymentLabel} efter granskning.`, icon: WalletCards },
   ];
 
   return (
@@ -591,8 +609,8 @@ const DesktopCommerceFlow = ({ offers, model, storage, color, conditionAnswers, 
               </div>
               <div className="cmp-commerce-winner-action">
                 <div className="cmp-commerce-winner-price">
-                  <small>DU FÅR</small>
-                  <strong>{fmt(best.pris)}<Squiggle /></strong>
+                  <small>{hasEstimatedRange(best) ? "UPPSKATTNING" : "DU FÅR"}</small>
+                  <strong>{offerPriceText(best)}<Squiggle /></strong>
                   <em>SEK</em>
                 </div>
                 <button type="button" onClick={() => beginCheckout(best)}>
@@ -614,8 +632,10 @@ const DesktopCommerceFlow = ({ offers, model, storage, color, conditionAnswers, 
                       </div>
                     </div>
                     <div>
-                      <strong>{fmt(offer.pris)} kr</strong>
-                      <span className={diff === 0 ? "low" : undefined}>{diff > 0 ? `+${fmt(diff)} kr` : "lägsta bud"}</span>
+                      <strong>{offerPriceText(offer)} kr</strong>
+                      <span className={diff === 0 ? "low" : undefined}>
+                        {hasEstimatedRange(offer) ? "uppskattat intervall" : diff > 0 ? `+${fmt(diff)} kr` : "lägsta bud"}
+                      </span>
                     </div>
                     <button type="button" onClick={() => beginCheckout(offer)}>
                       Sälj
@@ -818,7 +838,8 @@ const DesktopCommerceFlow = ({ offers, model, storage, color, conditionAnswers, 
             ["PayPal-avgift", `-${fmt(paypalFee(activeOffer.pris))} kr`],
           ]
         : []),
-      ...(shippingFeeSek || payment === "paypal" ? [["Efter avgifter", `${fmt(payoutAmount(activeOffer, payment, shippingFeeSek))} kr`]] : []),
+      ...(shippingFeeSek || payment === "paypal" ? [["Efter avgifter", `${payoutText(activeOffer, payment, shippingFeeSek)} kr`]] : []),
+      ...(hasEstimatedRange(activeOffer) ? [["Prisstatus", "Uppskattat intervall – slutpris efter kontroll"]] : []),
       ["Namn", `${form.firstName} ${form.lastName}`],
       ["Adress", `${form.address}, ${form.postalCode} ${form.city}`],
     ];
@@ -884,7 +905,7 @@ const DesktopCommerceFlow = ({ offers, model, storage, color, conditionAnswers, 
               {payment === "paypal" ? <div><dt>PayPal-avgift</dt><dd>-{fmt(paypalFee(activeOffer.pris))} kr</dd></div> : null}
               <div><dt>Beräknad utbetalning</dt><dd>4–5 dagar</dd></div>
             </dl>
-            <footer><span>Du får utbetalt</span><strong>{fmt(payoutAmount(activeOffer, payment, shippingFeeSek))} kr<Squiggle /></strong></footer>
+            <footer><span>{hasEstimatedRange(activeOffer) ? "Uppskattad utbetalning" : "Du får utbetalt"}</span><strong>{payoutText(activeOffer, payment, shippingFeeSek)} kr<Squiggle /></strong></footer>
           </section>
           <section>
             <Timeline offer={activeOffer} email={form.email} paymentLabel={paymentLabel} payment={payment} shippingFeeSek={shippingFeeSek} />

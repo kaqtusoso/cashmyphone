@@ -4,6 +4,8 @@ export interface CompanyOffer {
   lagring: string;
   skick: string;
   pris: number;
+  prisMax?: number;
+  uppskattatIntervall?: boolean;
   url: string;
   leverans: string;
   utbetalningstid: string;

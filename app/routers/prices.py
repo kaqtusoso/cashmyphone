@@ -31,7 +31,7 @@ async def _refresh_official_quote(
 ) -> Optional["RetailerQuote"]:
     """Verifiera publika livepriser och dölj bud som inte kan bekräftas."""
     retailer = quote.retailer.lower()
-    if retailer not in {"telestore", "happyphone", "fixmyphone", "renewed"}:
+    if retailer not in {"telestore", "happyphone", "fixmyphone", "renewed", "fixiphone"}:
         return quote
     if retailer != "renewed" and not quote.url:
         return None
@@ -60,6 +60,14 @@ async def _refresh_official_quote(
                 storage_gb,
                 quote.condition_key,
             )
+        elif retailer == "fixiphone":
+            from ..scrapers.fixiphone import FixiphoneScraper
+
+            live_call = FixiphoneScraper().fetch_live_quote(
+                model,
+                storage_gb,
+                quote.condition_key,
+            )
         else:
             from ..scrapers.renewed import RenewedScraper
 
@@ -78,6 +86,11 @@ async def _refresh_official_quote(
                 retailer=quote.retailer,
                 condition_key=quote.condition_key,
                 price_sek=int(live["price_sek"]),
+                price_max_sek=(
+                    int(live["price_max_sek"])
+                    if live.get("price_max_sek") is not None
+                    else None
+                ),
                 url=quote.url,
                 scraped_at=datetime.now(UTC).replace(tzinfo=None),
             )
@@ -249,6 +262,7 @@ class RetailerQuote(BaseModel):
     retailer:      str
     condition_key: str
     price_sek:     int
+    price_max_sek: Optional[int] = None
     url:           Optional[str]
     scraped_at:    datetime
 

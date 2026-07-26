@@ -62,7 +62,7 @@ class CrosswalkRegressionTests(unittest.TestCase):
             phonehero_conditions(answers, model="iPhone 13"),
         )
         self.assertEqual(renewed_condition(answers), "worn")
-        self.assertEqual(fixiphone_se_condition(answers), "d10")
+        self.assertEqual(fixiphone_se_condition(answers), "d20")
         self.assertEqual(
             fixphonepro_condition(answers),
             "s=ms|b=n|d=no|f=y|bt=ok",
@@ -184,14 +184,14 @@ class CrosswalkRegressionTests(unittest.TestCase):
 
         self.assertEqual(fixiphone_se_condition(answers), "d0")
 
-    def test_fixiphone_light_wear_maps_to_unnoticeable_deduction(self):
+    def test_fixiphone_light_wear_maps_to_noticeable_deduction(self):
         answers = FormAnswers(
             screen_surface="GOOD",
             sides_surface="LIKE_NEW",
             back_surface="LIKE_NEW",
         )
 
-        self.assertEqual(fixiphone_se_condition(answers), "d10")
+        self.assertEqual(fixiphone_se_condition(answers), "d20")
 
     def test_fixiphone_visible_wear_maps_to_noticeable_deduction(self):
         answers = FormAnswers(
@@ -298,6 +298,28 @@ class OfficialLiveQuoteTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(refreshed.price_sek, 2180)
+
+    async def test_fixiphone_live_quote_exposes_estimate_range(self):
+        stale = RetailerQuote(
+            retailer="fixiphone",
+            condition_key="d65",
+            price_sek=95,
+            url="https://www.fixiphone.se/salj-din-mobil/",
+            scraped_at=datetime(2026, 7, 26, 16, 1),
+        )
+        with patch(
+            "app.scrapers.fixiphone.FixiphoneScraper.fetch_live_quote",
+            new=AsyncMock(return_value={
+                "price_sek": 95,
+                "price_max_sek": 420,
+            }),
+        ):
+            refreshed = await _refresh_official_quote(
+                stale, "iPhone XR", 128
+            )
+
+        self.assertEqual(refreshed.price_sek, 95)
+        self.assertEqual(refreshed.price_max_sek, 420)
 
 
 if __name__ == "__main__":

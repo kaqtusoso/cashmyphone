@@ -455,10 +455,12 @@ def fixiphone_se_condition(a: FormAnswers) -> str:
 
     visual_wear = _worst(a.screen_surface, a.sides_surface)
     # Fixiphone skiljer bara på "Nej", "Omärkbar" och "Märkbar" för
-    # repor/bucklor. Lätta repor i Televeras flöde motsvarar omärkbara spår.
-    if visual_wear in {"ALMOST_NEW", "GOOD"}:
+    # repor/bucklor. Mikrorepor motsvarar "Omärkbar", medan Televeras
+    # "Visst slitage" uttryckligen syns vid vissa vinklar och därför är
+    # "Märkbar" hos Fixiphone.
+    if visual_wear == "ALMOST_NEW":
         deduction += 10
-    elif visual_wear == "MODERATE":
+    elif visual_wear in {"GOOD", "MODERATE"}:
         deduction += 20
 
     if _glass_cracked(a) or _back_cracked(a):

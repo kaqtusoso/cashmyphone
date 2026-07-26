@@ -1410,3 +1410,10 @@
     display: none;
   }
 }
+.cmp-mcommerce-range-note {
+  margin: -8px 20px 14px;
+  color: #6a5a3d;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
