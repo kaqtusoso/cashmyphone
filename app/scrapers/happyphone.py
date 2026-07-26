@@ -148,14 +148,22 @@ def _calc_price(
 
     price = int(base_str)
 
-    if no_working:
-        price -= int(calc.get("ifWorking", 0) or 0)
-    if no_display:
-        price -= int(calc.get("ifDisplay", 0) or 0)
-    if no_back:
-        price -= int(calc.get("ifCrackedBack", 0) or 0)
-    if no_battery:
-        price -= int(calc.get("ifBattery", 0) or 0)
+    deductions = (
+        ("ifWorking", no_working),
+        ("ifDisplay", no_display),
+        ("ifCrackedBack", no_back),
+        ("ifBattery", no_battery),
+    )
+    for field, enabled in deductions:
+        if not enabled:
+            continue
+        raw_value = calc.get(field)
+        if raw_value is None or raw_value == "":
+            return None
+        try:
+            price -= int(raw_value)
+        except (TypeError, ValueError):
+            return None
 
     lowest = int(calc.get("lowest", 0) or 0)
     price = max(price, lowest)
@@ -241,16 +249,59 @@ def _compute_all_prices(model_name: str, calc: Dict, slug: str) -> List[Dict]:
     """
     Beräkna alla 65 prisvarianter per lagring (64 normala + water_damaged).
     """
-    variations  = calc.get("variations", [])
+    raw_variations = calc.get("variations", [])
     water_price = int(calc.get("isWaterDamaged", 60) or 60)
     model_url   = f"{PRODUCT_URL}{slug}"
     records: List[Dict] = []
 
-    for idx, var in enumerate(variations):
+    missing_deductions = [
+        field
+        for field in ("ifWorking", "ifDisplay", "ifCrackedBack", "ifBattery")
+        if calc.get(field) is None or calc.get(field) == ""
+    ]
+    if missing_deductions:
+        logger.warning(
+            "HappyPhone: %s (%s) saknar avdrag %s; berörda felkombinationer utelämnas",
+            model_name,
+            slug,
+            ", ".join(missing_deductions),
+        )
+
+    # HappyPhone kan publicera samma lagring flera gånger (iPhone XR har två
+    # 128 GB-rader). Slå ihop dem per skick innan kombinationerna expanderas.
+    variations_by_storage: Dict[int, Dict[str, Any]] = {}
+    for var in raw_variations:
         storage_gb = _storage_label_to_gb(var.get("storage", ""))
         if storage_gb is None:
             continue
+        existing = variations_by_storage.get(storage_gb)
+        if existing is None:
+            variations_by_storage[storage_gb] = dict(var)
+            continue
+        logger.warning(
+            "HappyPhone: %s (%s) har dubblett för %s GB; högsta baspris per skick behålls",
+            model_name,
+            slug,
+            storage_gb,
+        )
+        for condition in CONDITIONS:
+            current_value = existing.get(condition)
+            candidate_value = var.get(condition)
+            try:
+                current_price = int(current_value)
+            except (TypeError, ValueError):
+                current_price = -1
+            try:
+                candidate_price = int(candidate_value)
+            except (TypeError, ValueError):
+                candidate_price = -1
+            if candidate_price > current_price:
+                existing[condition] = candidate_value
 
+    variations = list(variations_by_storage.items())
+    calc_for_storage = {**calc, "variations": [var for _, var in variations]}
+
+    for idx, (storage_gb, var) in enumerate(variations):
         if water_price >= MIN_PRICE:
             records.append({
                 "model":      model_name,
@@ -268,7 +319,7 @@ def _compute_all_prices(model_name: str, calc: Dict, slug: str) -> List[Dict]:
                 (False, True), (False, True), (False, True), (False, True),
             ):
                 price = _calc_price(
-                    calc, idx, condition,
+                    calc_for_storage, idx, condition,
                     no_working, no_display, no_back, no_battery,
                 )
                 if price is None or price < MIN_PRICE:
