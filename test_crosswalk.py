@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.pricing.crosswalk import (
@@ -13,7 +14,10 @@ from app.pricing.crosswalk import (
     telestore_condition,
 )
 from app.routers.prices import (
+    QuoteRequest,
     RetailerQuote,
+    _fixiphone_price_max,
+    get_quote,
     _phonehero_ignores_battery,
     _refresh_official_quote,
 )
@@ -299,27 +303,88 @@ class OfficialLiveQuoteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(refreshed.price_sek, 2180)
 
-    async def test_fixiphone_live_quote_exposes_estimate_range(self):
-        stale = RetailerQuote(
+    async def test_fixiphone_uses_precomputed_database_range(self):
+        stored = RetailerQuote(
             retailer="fixiphone",
             condition_key="d65",
             price_sek=95,
+            price_max_sek=420,
             url="https://www.fixiphone.se/salj-din-mobil/",
             scraped_at=datetime(2026, 7, 26, 16, 1),
         )
         with patch(
             "app.scrapers.fixiphone.FixiphoneScraper.fetch_live_quote",
-            new=AsyncMock(return_value={
-                "price_sek": 95,
-                "price_max_sek": 420,
-            }),
-        ):
-            refreshed = await _refresh_official_quote(
-                stale, "iPhone XR", 128
-            )
+            new=AsyncMock(side_effect=AssertionError("unexpected live request")),
+        ) as live_quote:
+            refreshed = await _refresh_official_quote(stored, "iPhone XR", 128)
 
         self.assertEqual(refreshed.price_sek, 95)
         self.assertEqual(refreshed.price_max_sek, 420)
+        live_quote.assert_not_awaited()
+
+    def test_fixiphone_range_is_derived_from_stored_base_price(self):
+        self.assertEqual(_fixiphone_price_max("d65", 1200), 420)
+        self.assertIsNone(_fixiphone_price_max("good", 1200))
+        self.assertIsNone(_fixiphone_price_max("d65", None))
+
+
+class QuoteQueryRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_quote_uses_indexable_filters_and_derives_fixiphone_range(self):
+        scraped_at = datetime(2026, 7, 29, 10, 0)
+        rows = [
+            SimpleNamespace(
+                retailer="fixiphone",
+                model="iPhone 15 Pro",
+                storage_gb=128,
+                condition="d0",
+                price_sek=4700,
+                url="https://www.fixiphone.se/salj-din-mobil/",
+                scraped_at=scraped_at,
+            ),
+            SimpleNamespace(
+                retailer="fixiphone",
+                model="iPhone 15 Pro",
+                storage_gb=128,
+                condition="d20",
+                price_sek=3360,
+                url="https://www.fixiphone.se/salj-din-mobil/",
+                scraped_at=scraped_at,
+            ),
+        ]
+
+        class Result:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return rows
+
+        db = AsyncMock()
+        db.execute.return_value = Result()
+        request = QuoteRequest(
+            model="iPhone 15 Pro",
+            storage_gb=128,
+            battery_health_percent=90,
+            screen_surface="GOOD",
+            sides_surface="GOOD",
+            back_surface="GOOD",
+        )
+
+        async def keep_quote(quote, *_args):
+            return quote
+
+        with patch(
+            "app.routers.prices._refresh_official_quote",
+            new=AsyncMock(side_effect=keep_quote),
+        ):
+            response = await get_quote(request, db)
+
+        statement = str(db.execute.await_args.args[0]).lower()
+        self.assertNotIn("lower(", statement)
+        self.assertEqual(len(response.quotes), 1)
+        self.assertEqual(response.quotes[0].condition_key, "d20")
+        self.assertEqual(response.quotes[0].price_sek, 3360)
+        self.assertEqual(response.quotes[0].price_max_sek, 3760)
 
 
 if __name__ == "__main__":

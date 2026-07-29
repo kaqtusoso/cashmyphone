@@ -18,10 +18,12 @@ from ..models import (
 )
 from ..pricing.crosswalk import FormAnswers, all_conditions, phonehero_conditions
 from ..pricing.history import replace_current_buyback_prices
+from ..scrapers.fixiphone import _deduction_from_condition, _upper_bound_price
 from ..config import settings
 
 router = APIRouter(prefix="/api", tags=["prices"])
 logger = logging.getLogger(__name__)
+LIVE_QUOTE_TIMEOUT_SECONDS = 2.0
 
 
 async def _refresh_official_quote(
@@ -31,7 +33,7 @@ async def _refresh_official_quote(
 ) -> Optional["RetailerQuote"]:
     """Verifiera publika livepriser och dölj bud som inte kan bekräftas."""
     retailer = quote.retailer.lower()
-    if retailer not in {"telestore", "happyphone", "fixmyphone", "renewed", "fixiphone"}:
+    if retailer not in {"telestore", "happyphone", "fixmyphone", "renewed"}:
         return quote
     if retailer != "renewed" and not quote.url:
         return None
@@ -60,14 +62,6 @@ async def _refresh_official_quote(
                 storage_gb,
                 quote.condition_key,
             )
-        elif retailer == "fixiphone":
-            from ..scrapers.fixiphone import FixiphoneScraper
-
-            live_call = FixiphoneScraper().fetch_live_quote(
-                model,
-                storage_gb,
-                quote.condition_key,
-            )
         else:
             from ..scrapers.renewed import RenewedScraper
 
@@ -79,7 +73,7 @@ async def _refresh_official_quote(
 
         live = await asyncio.wait_for(
             live_call,
-            timeout=8,
+            timeout=LIVE_QUOTE_TIMEOUT_SECONDS,
         )
         if live and int(live["price_sek"]) > 0:
             return RetailerQuote(
@@ -97,6 +91,19 @@ async def _refresh_official_quote(
     except Exception as exc:
         logger.warning("%s live-verifiering misslyckades: %s", retailer, exc)
     return None
+
+
+def _fixiphone_price_max(
+    condition_key: str,
+    base_price_sek: Optional[int],
+) -> Optional[int]:
+    """Beräkna Fixiphones övre intervallgräns från den lagrade d0-raden."""
+    if base_price_sek is None:
+        return None
+    deduction = _deduction_from_condition(condition_key)
+    if deduction is None:
+        return None
+    return _upper_bound_price(base_price_sek, deduction)
 
 
 def _normalize_iphone_model(model: str) -> str:
@@ -329,17 +336,20 @@ async def get_quote(
     # 3. Hämta det bästa (högsta) priset per återförsäljare i ett enda DB-anrop
     #    Bygg OR-filter: (retailer='swappie' AND condition='…') OR …
     retailer_filters = []
-    active_retailers: List[str] = []  # de som faktiskt lägger bud
     for retailer, ckey in conditions.items():
         if ckey is None:
             continue  # t.ex. Telestore om enheten inte fungerar
-        active_retailers.append(retailer)
         condition_keys = ckey if isinstance(ckey, list) else [ckey]
+        query_condition_keys = list(condition_keys)
+        if retailer == "fixiphone" and "d0" not in query_condition_keys:
+            # d0 innehåller baspriset som behövs för att visa Fixiphones
+            # uppskattningsintervall utan ett 3,4 MB stort liveanrop.
+            query_condition_keys.append("d0")
         retailer_filters.append(
             and_(
-                func.lower(BuybackPrice.retailer)  == retailer,
-                func.lower(BuybackPrice.condition).in_([c.lower() for c in condition_keys]),
-                func.lower(BuybackPrice.model) == model_normalized.lower(),
+                BuybackPrice.retailer == retailer,
+                BuybackPrice.condition.in_(query_condition_keys),
+                BuybackPrice.model == model_normalized,
                 BuybackPrice.storage_gb == req.storage_gb,
                 BuybackPrice.is_active == True,
                 BuybackPrice.price_sek > 0,
@@ -364,10 +374,30 @@ async def get_quote(
     )
     rows = result.scalars().all()
 
+    fixiphone_base_price = max(
+        (
+            row.price_sek
+            for row in rows
+            if row.retailer == "fixiphone" and row.condition == "d0"
+        ),
+        default=None,
+    )
+    fixiphone_conditions = conditions.get("fixiphone")
+    requested_fixiphone_conditions = set(
+        fixiphone_conditions
+        if isinstance(fixiphone_conditions, list)
+        else [fixiphone_conditions]
+    )
+
     # 4. Plocka bästa priset per återförsäljare (första i fallande ordning)
     seen: set = set()
     quotes: List[RetailerQuote] = []
     for row in rows:
+        if (
+            row.retailer == "fixiphone"
+            and row.condition not in requested_fixiphone_conditions
+        ):
+            continue
         if row.retailer in seen:
             continue
         seen.add(row.retailer)
@@ -375,6 +405,11 @@ async def get_quote(
             retailer=row.retailer,
             condition_key=row.condition,
             price_sek=row.price_sek,
+            price_max_sek=(
+                _fixiphone_price_max(row.condition, fixiphone_base_price)
+                if row.retailer == "fixiphone"
+                else None
+            ),
             url=row.url,
             scraped_at=row.scraped_at,
         ))
