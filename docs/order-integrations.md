@@ -80,13 +80,17 @@ konfigurerat.
 Jobbet markerar varje orderrad med:
 
 - `Feedbackmail skickat`
-- `Feedbackmail status`
-- `Feedbackmail fel`
 - `Resend mejl-ID`
+- `Feedbackmail status`
 
-Innan utskicket markeras raden som `sending`. Resend-anropet använder dessutom
+Innan utskicket markeras raden som `Skickar`, och ett lyckat utskick markeras
+som `Skickat`. Resend-anropet använder dessutom
 en stabil idempotency-nyckel per order. Det förhindrar dubbla utskick om Resend
 tar emot mailet men en efterföljande uppdatering av kalkylarket misslyckas.
+
+`Feedback`-fliken är den auktoritativa utskickslistan. Borttagna rader
+återskapas inte från `Orders`; endast helt nya ordernummer läggs till när en ny
+order sparas.
 
 En säker produktionskontroll som inte skickar mail kan köras med:
 
@@ -157,6 +161,7 @@ Köpare
 Modell
 Lagring
 Pris (SEK)
+Differens (SEK)
 Frakt
 Betalning
 Förnamn
@@ -169,10 +174,15 @@ Postnummer
 Ort
 Betalningsuppgifter
 Skick / frågesvar
+```
+
+`Feedback`-fliken använder endast:
+
+```text
+Ordernummer
 Feedbackmail skickat
-Feedbackmail status
-Feedbackmail fel
 Resend mejl-ID
+Feedbackmail status
 ```
 
 `Betalningsuppgifter` och `Skick / frågesvar` sparas som läsbar flerradig text i cellen.

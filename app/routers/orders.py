@@ -44,9 +44,8 @@ FEEDBACK_SHEET_NAME = "Feedback"
 FEEDBACK_SHEET_COLUMNS = [
     ("order_id", "Ordernummer", 190),
     ("feedback_email_sent_at", "Feedbackmail skickat", 175),
-    ("feedback_email_status", "Feedbackmail status", 145),
-    ("feedback_email_error", "Feedbackmail fel", 260),
     ("feedback_email_id", "Resend mejl-ID", 245),
+    ("feedback_email_status", "Feedbackmail status", 145),
 ]
 SHEET_KEYS = [key for key, _, _ in SHEET_COLUMNS]
 SHEET_HEADERS = [header for _, header, _ in SHEET_COLUMNS]
@@ -324,10 +323,23 @@ def _row_mapping(
     return mapped
 
 
+def _localized_feedback_status(value: Any) -> str:
+    status = str(value or "").strip()
+    return {
+        "sending": "Skickar",
+        "sent": "Skickat",
+        "scheduled": "Schemalagd",
+        "failed": "Misslyckades",
+    }.get(status.lower(), status)
+
+
 def _feedback_sheet_rows(
     order_headers: list[str],
     order_rows: list[list[Any]],
     existing_feedback_values: list[list[Any]],
+    *,
+    seed_from_orders: bool = False,
+    append_order_ids: set[str] | None = None,
 ) -> list[list[Any]]:
     existing_by_order: dict[str, dict[str, Any]] = {}
     existing_order_sequence: list[str] = []
@@ -342,11 +354,14 @@ def _feedback_sheet_rows(
             )
             order_id = str(mapped.get("order_id") or "").strip()
             if order_id and order_id not in existing_by_order:
+                mapped["feedback_email_status"] = _localized_feedback_status(
+                    mapped.get("feedback_email_status")
+                )
                 existing_by_order[order_id] = mapped
                 existing_order_sequence.append(order_id)
 
-    merged_by_order: dict[str, dict[str, Any]] = {}
-    order_sequence: list[str] = []
+    order_by_id: dict[str, dict[str, Any]] = {}
+    source_order_sequence: list[str] = []
     for raw_row in order_rows:
         mapped = _row_mapping(
             order_headers,
@@ -355,19 +370,34 @@ def _feedback_sheet_rows(
             {**SHEET_HEADER_TO_KEY, **FEEDBACK_SHEET_HEADER_TO_KEY},
         )
         order_id = str(mapped.get("order_id") or "").strip()
-        if not order_id or order_id in merged_by_order:
+        if not order_id or order_id in order_by_id:
             continue
+        mapped["feedback_email_status"] = _localized_feedback_status(
+            mapped.get("feedback_email_status")
+        )
+        order_by_id[order_id] = mapped
+        source_order_sequence.append(order_id)
 
-        existing = existing_by_order.get(order_id, {})
+    merged_by_order: dict[str, dict[str, Any]] = {}
+    order_sequence: list[str] = []
+    for order_id in existing_order_sequence:
+        existing = existing_by_order[order_id]
+        source = order_by_id.get(order_id, {})
         merged = {"order_id": order_id}
         for key in FEEDBACK_SHEET_KEYS[1:]:
-            merged[key] = existing.get(key) or mapped.get(key) or ""
+            merged[key] = existing.get(key) or source.get(key) or ""
         merged_by_order[order_id] = merged
         order_sequence.append(order_id)
 
-    for order_id in existing_order_sequence:
-        if order_id not in merged_by_order:
-            merged_by_order[order_id] = existing_by_order[order_id]
+    requested_order_ids = append_order_ids or set()
+    for order_id in source_order_sequence:
+        should_add = seed_from_orders or order_id in requested_order_ids
+        if should_add and order_id not in merged_by_order:
+            source = order_by_id[order_id]
+            merged_by_order[order_id] = {
+                key: source.get(key, "") if key != "order_id" else order_id
+                for key in FEEDBACK_SHEET_KEYS
+            }
             order_sequence.append(order_id)
 
     return [
@@ -397,6 +427,9 @@ def _feedback_status_rows(
         )
         order_id = str(mapped.get("order_id") or "").strip()
         if order_id and order_id not in statuses:
+            mapped["feedback_email_status"] = _localized_feedback_status(
+                mapped.get("feedback_email_status")
+            )
             statuses[order_id] = mapped
             row_numbers[order_id] = row_number
     return statuses, row_numbers
@@ -459,9 +492,9 @@ async def _get_or_create_google_sheet_id(
     client: httpx.AsyncClient,
     token: str,
     sheet_name: str,
-) -> int:
+) -> tuple[int, bool]:
     try:
-        return await _get_google_sheet_id(client, token, sheet_name)
+        return await _get_google_sheet_id(client, token, sheet_name), False
     except ValueError:
         spreadsheet_id = settings.google_sheets_spreadsheet_id
         response = await client.post(
@@ -473,7 +506,7 @@ async def _get_or_create_google_sheet_id(
         replies = response.json().get("replies", [])
         if not replies:
             raise ValueError(f"Kunde inte skapa worksheet '{sheet_name}'.")
-        return int(replies[0]["addSheet"]["properties"]["sheetId"])
+        return int(replies[0]["addSheet"]["properties"]["sheetId"]), True
 
 
 def _google_sheet_data_row_format() -> dict[str, Any]:
@@ -648,6 +681,7 @@ async def _format_google_sheet(client: httpx.AsyncClient, token: str, sheet_id: 
 async def _migrate_feedback_sheet_layout(
     client: httpx.AsyncClient,
     token: str,
+    append_order_id: str | None = None,
 ) -> tuple[int, int]:
     sheet_name = settings.google_sheets_worksheet_name
     spreadsheet_id = settings.google_sheets_spreadsheet_id
@@ -679,7 +713,7 @@ async def _migrate_feedback_sheet_layout(
         order_headers = SHEET_HEADERS
         order_rows = []
 
-    feedback_sheet_id = await _get_or_create_google_sheet_id(
+    feedback_sheet_id, feedback_sheet_created = await _get_or_create_google_sheet_id(
         client,
         token,
         FEEDBACK_SHEET_NAME,
@@ -695,21 +729,39 @@ async def _migrate_feedback_sheet_layout(
         order_headers,
         order_rows,
         existing_feedback_values,
+        seed_from_orders=feedback_sheet_created,
+        append_order_ids={append_order_id} if append_order_id else None,
     )
 
-    clear_response = await client.post(
-        f"{base_url}/{feedback_range}:clear",
-        headers=headers,
-        json={},
-    )
-    clear_response.raise_for_status()
-    update_response = await client.put(
-        f"{base_url}/{feedback_range}",
-        params={"valueInputOption": "USER_ENTERED"},
-        headers=headers,
-        json={"values": feedback_rows},
-    )
-    update_response.raise_for_status()
+    existing_header = existing_feedback_values[0] if existing_feedback_values else []
+    layout_requires_rewrite = feedback_sheet_created or existing_header != FEEDBACK_SHEET_HEADERS
+    if layout_requires_rewrite:
+        clear_response = await client.post(
+            f"{base_url}/{feedback_range}:clear",
+            headers=headers,
+            json={},
+        )
+        clear_response.raise_for_status()
+        update_response = await client.put(
+            f"{base_url}/{feedback_range}",
+            params={"valueInputOption": "USER_ENTERED"},
+            headers=headers,
+            json={"values": feedback_rows},
+        )
+        update_response.raise_for_status()
+    elif append_order_id:
+        existing_statuses, _ = _feedback_status_rows(existing_feedback_values)
+        if append_order_id not in existing_statuses:
+            append_response = await client.post(
+                f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{feedback_range}:append",
+                params={
+                    "valueInputOption": "USER_ENTERED",
+                    "insertDataOption": "INSERT_ROWS",
+                },
+                headers=headers,
+                json={"values": [[append_order_id, "", "", ""]]},
+            )
+            append_response.raise_for_status()
 
     verify_response = await client.get(
         f"{base_url}/{feedback_range}",
@@ -733,7 +785,12 @@ async def _migrate_feedback_sheet_layout(
                 f"Feedbackstatus för order {order_id} kunde inte verifieras."
             )
 
-    legacy_headers = set(FEEDBACK_SHEET_HEADERS[1:])
+    legacy_headers = {
+        "Feedbackmail skickat",
+        "Feedbackmail status",
+        "Feedbackmail fel",
+        "Resend mejl-ID",
+    }
     legacy_column_indices = [
         index
         for index, header in enumerate(order_headers)
@@ -913,7 +970,11 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
                 )
                 format_response.raise_for_status()
 
-            await _migrate_feedback_sheet_layout(client, token)
+            await _migrate_feedback_sheet_layout(
+                client,
+                token,
+                append_order_id=order.order_id,
+            )
 
         return IntegrationStatus(configured=True, ok=True, message="Order skickad till Google Sheet via Sheets API.")
     except Exception as exc:
@@ -1614,7 +1675,14 @@ def _feedback_candidate_is_due(row: dict[str, Any], now: datetime) -> bool:
         return False
     if not _feedback_row_value(row, "email"):
         return False
-    if _feedback_row_value(row, "feedback_email_status").lower() in {"sending", "sent", "scheduled"}:
+    if _feedback_row_value(row, "feedback_email_status").lower() in {
+        "sending",
+        "sent",
+        "scheduled",
+        "skickar",
+        "skickat",
+        "schemalagd",
+    }:
         return False
 
     created_at = _parse_feedback_order_datetime(_feedback_row_value(row, "created_at"))
@@ -1654,7 +1722,7 @@ async def _update_feedback_email_sheet_status(
         _feedback_sheet_column_index("feedback_email_sent_at") + 1
     )
     end_col = _sheet_column_letter(
-        _feedback_sheet_column_index("feedback_email_id") + 1
+        _feedback_sheet_column_index("feedback_email_status") + 1
     )
     update_range = httpx.URL(
         f"https://example.com/{FEEDBACK_SHEET_NAME}!{start_col}{feedback_row_number}:{end_col}{feedback_row_number}"
@@ -1759,17 +1827,21 @@ async def run_order_feedback_emails(dry_run: bool = False) -> IntegrationStatus:
                     base_url,
                     headers,
                     feedback_row_number,
-                    ["", "sending", "", ""],
+                    ["", "", "Skickar"],
                 )
 
                 try:
                     email_id = await _send_feedback_email(row)
                     sent_count += 1
-                    status_values = [now.strftime("%Y-%m-%d %H:%M"), "sent", "", email_id]
+                    status_values = [
+                        now.strftime("%Y-%m-%d %H:%M"),
+                        email_id,
+                        "Skickat",
+                    ]
                 except Exception as exc:
                     failed_count += 1
                     logger.exception("Kunde inte skicka feedbackmail för order %s", _feedback_row_value(row, "order_id"))
-                    status_values = ["", "failed", str(exc)[:500], ""]
+                    status_values = ["", "", "Misslyckades"]
 
                 await _update_feedback_email_sheet_status(
                     client,

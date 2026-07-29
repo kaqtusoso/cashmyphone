@@ -24,9 +24,8 @@ def make_row(**overrides):
         "model": "iPhone 15",
         "email": "anna@example.test",
         "feedback_email_sent_at": "",
-        "feedback_email_status": "",
-        "feedback_email_error": "",
         "feedback_email_id": "",
+        "feedback_email_status": "",
     }
     row.update(overrides)
     return row
@@ -70,13 +69,12 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
             [
                 "Ordernummer",
                 "Feedbackmail skickat",
-                "Feedbackmail status",
-                "Feedbackmail fel",
                 "Resend mejl-ID",
+                "Feedbackmail status",
             ],
         )
 
-    def test_feedback_sheet_rows_migrate_legacy_values_and_preserve_existing(self):
+    def test_feedback_sheet_rows_preserve_deletions_and_append_only_new_order(self):
         legacy_headers = [
             *SHEET_HEADERS,
             "Feedbackmail skickat",
@@ -91,25 +89,61 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
         first_order[legacy_headers.index("Resend mejl-ID")] = "legacy-id"
         second_order = [""] * len(legacy_headers)
         second_order[legacy_headers.index("Ordernummer")] = "TLV-SECOND"
+        new_order = [""] * len(legacy_headers)
+        new_order[legacy_headers.index("Ordernummer")] = "TLV-NEW"
 
         rows = _feedback_sheet_rows(
             legacy_headers,
-            [first_order, second_order],
+            [first_order, second_order, new_order],
             [
-                FEEDBACK_SHEET_HEADERS,
-                ["TLV-FIRST", "2026-08-06 09:16", "sent", "", "existing-id"],
+                [
+                    "Ordernummer",
+                    "Feedbackmail skickat",
+                    "Feedbackmail status",
+                    "Feedbackmail fel",
+                    "Resend mejl-ID",
+                ],
+                ["TLV-SECOND", "2026-08-06 09:16", "sent", "", "existing-id"],
             ],
+            append_order_ids={"TLV-NEW"},
         )
 
         self.assertEqual(rows[0], FEEDBACK_SHEET_HEADERS)
         self.assertEqual(
             rows[1],
-            ["TLV-FIRST", "2026-08-06 09:16", "sent", "", "existing-id"],
+            ["TLV-SECOND", "2026-08-06 09:16", "existing-id", "Skickat"],
         )
-        self.assertEqual(rows[2], ["TLV-SECOND", "", "", "", ""])
+        self.assertEqual(rows[2], ["TLV-NEW", "", "", ""])
+        self.assertNotIn("TLV-FIRST", [row[0] for row in rows[1:]])
         statuses, row_numbers = _feedback_status_rows(rows)
-        self.assertEqual(statuses["TLV-FIRST"]["feedback_email_id"], "existing-id")
-        self.assertEqual(row_numbers, {"TLV-FIRST": 2, "TLV-SECOND": 3})
+        self.assertEqual(statuses["TLV-SECOND"]["feedback_email_id"], "existing-id")
+        self.assertEqual(row_numbers, {"TLV-SECOND": 2, "TLV-NEW": 3})
+
+    def test_feedback_sheet_rows_seed_orders_only_when_sheet_is_created(self):
+        order_headers = ["Ordernummer"]
+        order_rows = [["TLV-FIRST"], ["TLV-SECOND"]]
+
+        preserved_empty = _feedback_sheet_rows(
+            order_headers,
+            order_rows,
+            [FEEDBACK_SHEET_HEADERS],
+        )
+        seeded = _feedback_sheet_rows(
+            order_headers,
+            order_rows,
+            [],
+            seed_from_orders=True,
+        )
+
+        self.assertEqual(preserved_empty, [FEEDBACK_SHEET_HEADERS])
+        self.assertEqual(
+            seeded,
+            [
+                FEEDBACK_SHEET_HEADERS,
+                ["TLV-FIRST", "", "", ""],
+                ["TLV-SECOND", "", "", ""],
+            ],
+        )
 
     def test_order_becomes_due_after_fourteen_days(self):
         now = datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc)
@@ -197,6 +231,12 @@ class FeedbackEmailTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(
                 _feedback_candidate_is_due(
                     make_row(feedback_email_status="sending"),
+                    now,
+                )
+            )
+            self.assertFalse(
+                _feedback_candidate_is_due(
+                    make_row(feedback_email_status="Skickat"),
                     now,
                 )
             )
