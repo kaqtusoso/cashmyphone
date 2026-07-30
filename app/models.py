@@ -95,6 +95,20 @@ class BuybackPriceHistory(Base):
     )
 
 
+class TrustpilotProfile(Base):
+    """Senast hämtade Trustpilot-data per återförsäljare."""
+    __tablename__ = "trustpilot_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    retailer: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    domain: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    profile_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    business_unit_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 # ─── Pydantic-scheman (API-svar) ─────────────────────────────────────────────
 
 class PriceOut(BaseModel):

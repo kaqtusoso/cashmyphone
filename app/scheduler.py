@@ -12,6 +12,7 @@ scheduler = AsyncIOScheduler()
 
 USED_PHONE_CATALOG_STARTUP_DELAY_SECONDS = 20
 USED_PHONE_CATALOG_MISFIRE_GRACE_SECONDS = 12 * 60 * 60
+TRUSTPILOT_STARTUP_DELAY_SECONDS = 30
 
 
 def _used_phone_catalog_startup_run_date(now: datetime | None = None) -> datetime:
@@ -20,6 +21,14 @@ def _used_phone_catalog_startup_run_date(now: datetime | None = None) -> datetim
     if current.tzinfo is None:
         raise ValueError("Startup run date requires a timezone-aware datetime")
     return current + timedelta(seconds=USED_PHONE_CATALOG_STARTUP_DELAY_SECONDS)
+
+
+def _trustpilot_startup_run_date(now: datetime | None = None) -> datetime:
+    """Return an aware instant for the startup Trustpilot refresh."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError("Startup run date requires a timezone-aware datetime")
+    return current + timedelta(seconds=TRUSTPILOT_STARTUP_DELAY_SECONDS)
 
 
 async def scrape_if_prices_empty():
@@ -46,6 +55,7 @@ def setup_scheduler():
     from .scrapers import run_all_scrapers
     from .database import AsyncSessionLocal
     from .routers.orders import run_order_feedback_emails
+    from .trustpilot import refresh_trustpilot_profiles
     from scripts.update_used_phone_catalog import update_used_phone_catalog
 
     async def scheduled_scrape():
@@ -79,6 +89,18 @@ def setup_scheduler():
             logger.info(result.message)
         else:
             logger.warning(result.message)
+
+    async def scheduled_trustpilot_refresh():
+        logger.info("⭐ Schemalagd uppdatering av Trustpilot-data startar...")
+        async with AsyncSessionLocal() as db:
+            statuses = await refresh_trustpilot_profiles(db)
+        updated = sum(status == "updated" for status in statuses.values())
+        errors = sum(status == "error" for status in statuses.values())
+        logger.info(
+            "Trustpilot-cache klar: %s uppdaterade, %s fel",
+            updated,
+            errors,
+        )
 
     async def scheduled_social_farm():
         from .social_farm.service import scheduled_generation
@@ -119,6 +141,21 @@ def setup_scheduler():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=USED_PHONE_CATALOG_MISFIRE_GRACE_SECONDS,
+    )
+
+    scheduler.add_job(
+        scheduled_trustpilot_refresh,
+        trigger=CronTrigger(
+            hour=settings.trustpilot_refresh_cron_hour,
+            minute=settings.trustpilot_refresh_cron_minute,
+            timezone=settings.scrape_timezone,
+        ),
+        id="trustpilot_profile_refresh",
+        name="Uppdatera Trustpilot-omdömen",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
     )
 
     if settings.feedback_email_enabled:
@@ -167,11 +204,27 @@ def setup_scheduler():
             misfire_grace_time=USED_PHONE_CATALOG_MISFIRE_GRACE_SECONDS,
         )
 
+    if settings.trustpilot_update_on_startup:
+        scheduler.add_job(
+            scheduled_trustpilot_refresh,
+            trigger=DateTrigger(
+                run_date=_trustpilot_startup_run_date(),
+                timezone=settings.scrape_timezone,
+            ),
+            id="trustpilot_profile_startup_refresh",
+            name="Uppdatera Trustpilot-omdömen efter startup",
+            replace_existing=True,
+            max_instances=1,
+            misfire_grace_time=300,
+        )
+
     scheduler.start()
     logger.info(
-        "✅ Scheduler igång – säljpriser %s:00, begagnat-katalog %s:00, feedbackmail %s, Social Farm %s (%s)",
+        "✅ Scheduler igång – säljpriser %s:00, begagnat-katalog %s:00, Trustpilot %02d:%02d, feedbackmail %s, Social Farm %s (%s)",
         settings.scrape_cron_hours,
         settings.used_phone_catalog_cron_hours,
+        settings.trustpilot_refresh_cron_hour,
+        settings.trustpilot_refresh_cron_minute,
         (
             f"{settings.feedback_email_cron_hour:02d}:{settings.feedback_email_cron_minute:02d}"
             if settings.feedback_email_enabled

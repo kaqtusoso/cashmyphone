@@ -88,6 +88,12 @@ PLAYWRIGHT_HEADLESS=true
 ALLOWED_ORIGINS=https://televera.se
 ```
 
+Antalet Trustpilot-omdömen läses från de åtta återförsäljarnas publika
+profilsidor i en headless Chromium-session och sparas i `trustpilot_profiles`
+kl. 00:05 svensk tid varje dag. Ingen Trustpilot-plan eller API-nyckel krävs.
+Vid deploy görs även en uppdatering 30 sekunder efter startup. Om en profil
+tillfälligt blockeras behålls dess senaste lyckade cachevärde.
+
 Railway Postgres behövs inte för nuvarande prisdataflöde. API:t läser den
 senaste aktiva prislistan från `buyback_prices`. Varje lyckad inläsning loggas
 dessutom i `price_snapshots`, medan `buyback_price_history` bara får en ny
@@ -188,6 +194,7 @@ FixPhonePro använder kompakta formelnycklar från deras publika JS:
 ## Databasschema
 
 - `buyback_prices` – aktuella inköpspriser per återförsäljare/modell/lagring/skick
+- `trustpilot_profiles` – daglig cache av betyg och antal omdömen
 - `price_snapshots` – en rad per lyckad komplett prisinläsning
 - `buyback_price_history` – historiska prisperioder med `valid_from`/`valid_to`
 - `scraper_runs` – logg över scraping-körningar med status och tidsstämplar

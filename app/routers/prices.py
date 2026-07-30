@@ -20,6 +20,7 @@ from ..pricing.crosswalk import FormAnswers, all_conditions, phonehero_condition
 from ..pricing.history import replace_current_buyback_prices
 from ..scrapers.fixiphone import _deduction_from_condition, _upper_bound_price
 from ..config import settings
+from ..trustpilot import get_trustpilot_snapshots
 
 router = APIRouter(prefix="/api", tags=["prices"])
 logger = logging.getLogger(__name__)
@@ -87,6 +88,10 @@ async def _refresh_official_quote(
                 ),
                 url=quote.url,
                 scraped_at=datetime.now(UTC).replace(tzinfo=None),
+                trustpilot_score=quote.trustpilot_score,
+                trustpilot_reviews=quote.trustpilot_reviews,
+                trustpilot_url=quote.trustpilot_url,
+                trustpilot_updated_at=quote.trustpilot_updated_at,
             )
     except Exception as exc:
         logger.warning("%s live-verifiering misslyckades: %s", retailer, exc)
@@ -272,6 +277,10 @@ class RetailerQuote(BaseModel):
     price_max_sek: Optional[int] = None
     url:           Optional[str]
     scraped_at:    datetime
+    trustpilot_score: Optional[float] = None
+    trustpilot_reviews: Optional[int] = None
+    trustpilot_url: Optional[str] = None
+    trustpilot_updated_at: Optional[datetime] = None
 
 
 class QuoteResponse(BaseModel):
@@ -390,6 +399,10 @@ async def get_quote(
     )
 
     # 4. Plocka bästa priset per återförsäljare (första i fallande ordning)
+    trustpilot = await get_trustpilot_snapshots(
+        db,
+        (row.retailer for row in rows),
+    )
     seen: set = set()
     quotes: List[RetailerQuote] = []
     for row in rows:
@@ -401,6 +414,7 @@ async def get_quote(
         if row.retailer in seen:
             continue
         seen.add(row.retailer)
+        trustpilot_profile = trustpilot.get(row.retailer)
         quotes.append(RetailerQuote(
             retailer=row.retailer,
             condition_key=row.condition,
@@ -412,6 +426,10 @@ async def get_quote(
             ),
             url=row.url,
             scraped_at=row.scraped_at,
+            trustpilot_score=trustpilot_profile.score if trustpilot_profile else None,
+            trustpilot_reviews=trustpilot_profile.review_count if trustpilot_profile else None,
+            trustpilot_url=trustpilot_profile.profile_url if trustpilot_profile else None,
+            trustpilot_updated_at=trustpilot_profile.updated_at if trustpilot_profile else None,
         ))
 
     # Återförsäljare kan ändra pris mellan de schemalagda fullscraperna.

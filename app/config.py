@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     used_phone_catalog_update_on_startup: bool = True
     request_timeout_seconds: int = 30
     playwright_headless: bool = True
+    playwright_executable_path: str = ""
     allowed_origins: str = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080,https://televera.se"
     environment: str = "development"
     google_sheets_webhook_url: str = ""
@@ -40,6 +41,9 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     order_submission_timeout_seconds: int = 10
     trustpilot_review_url: str = ""
+    trustpilot_refresh_cron_hour: int = 0
+    trustpilot_refresh_cron_minute: int = 5
+    trustpilot_update_on_startup: bool = True
     feedback_email_enabled: bool = False
     feedback_email_start_date: str = ""
     feedback_email_start_order_id: str = "TLV-020A6104AB"
