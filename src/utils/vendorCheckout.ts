@@ -107,7 +107,7 @@ export const dealerConfig: Record<string, DealerConfig> = {
   },
   fixphonepro: {
     name: "FixTech",
-    personalNumberRequirement: "swish",
+    personalNumberRequirement: "never",
     shippingOptions: [
       {
         id: "email-label",
@@ -117,10 +117,7 @@ export const dealerConfig: Record<string, DealerConfig> = {
       },
       storeOption("store-dropoff", "Inlämning via butik", ["Hantverkargatan 2B, Västerås"]),
     ],
-    paymentOptions: [
-      { id: "swish", label: "Swish", requiresBankDetails: false },
-      { id: "bank", label: "Banköverföring", requiresBankDetails: true },
-    ],
+    paymentOptions: [{ id: "bank", label: "Banköverföring", requiresBankDetails: true }],
   },
   phonehero: {
     name: "PhoneHero",

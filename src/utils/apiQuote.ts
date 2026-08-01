@@ -92,7 +92,7 @@ const RETAILER_INFO: Record<
     trustpilotScore: "4.0",
     trustpilotReviews: "3",
     trustpilotUrl: "https://se.trustpilot.com/review/fixtech.se",
-    paymentMethods: ["Swish", "Banköverföring"],
+    paymentMethods: ["Banköverföring"],
   },
 };
 
