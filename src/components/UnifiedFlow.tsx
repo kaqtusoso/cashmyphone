@@ -181,11 +181,11 @@ const screenConditionOptions: {
 ];
 
 const sideOptions: Option<WearLevelWithCrack>[] = [
-  { value: "none", label: "Som nya", summary: "Som nya" },
+  { value: "none", label: "Som ny", summary: "Som ny" },
   { value: "minimal", label: "Mikrorepor", summary: "Mikrorepor" },
   { value: "some", label: "Lätta repor", summary: "Lätta repor" },
   { value: "visible", label: "Repor/bucklor", summary: "Repor/bucklor" },
-  { value: "cracked", label: "Spruckna", summary: "Spruckna" },
+  { value: "cracked", label: "Sprucken", summary: "Sprucken" },
 ];
 
 const backOptions: Option<WearLevelWithCrack>[] = [
