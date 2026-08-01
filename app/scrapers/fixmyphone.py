@@ -41,6 +41,8 @@ beräknas lokalt med hjälp av formeln nedan.
        om baksida trasig:    pris -= ifCrackedBack
        om batteri < 85%:     pris -= ifBattery
        pris = max(pris, int(lowest))
+  Om ett valt avdrag saknas eller inte är numeriskt visar webbformuläret NaN.
+  Den kombinationen ska då inte lagras som ett giltigt bud.
   (HappyPhone-box +200 kr hanteras inte – det är en butiksbonus, inte ett skick)
 
 ─── Condition-nyckel (lagras i condition-kolumnen) ───────────────────────────
@@ -150,16 +152,27 @@ def _calc_price(
     if not base_str:
         return None
 
-    price = int(base_str)
+    try:
+        price = int(base_str)
+    except (TypeError, ValueError):
+        return None
 
-    if no_working:
-        price -= int(calc.get("ifWorking", 0) or 0)
-    if no_display:
-        price -= int(calc.get("ifDisplay", 0) or 0)
-    if no_back:
-        price -= int(calc.get("ifCrackedBack", 0) or 0)
-    if no_battery:
-        price -= int(calc.get("ifBattery", 0) or 0)
+    deductions = (
+        ("ifWorking", no_working),
+        ("ifDisplay", no_display),
+        ("ifCrackedBack", no_back),
+        ("ifBattery", no_battery),
+    )
+    for field, enabled in deductions:
+        if not enabled:
+            continue
+        raw_value = calc.get(field)
+        if raw_value is None or raw_value == "":
+            return None
+        try:
+            price -= int(raw_value)
+        except (TypeError, ValueError):
+            return None
 
     # Garanterat minimibud från FixMyPhone
     lowest = int(calc.get("lowest", 0) or 0)
@@ -264,6 +277,19 @@ def _compute_all_prices(
     water_price = int(calc.get("isWaterDamaged", 60) or 60)
     model_url   = f"{SELL_URL}{slug}"
     records: List[Dict] = []
+
+    missing_deductions = [
+        field
+        for field in ("ifWorking", "ifDisplay", "ifCrackedBack", "ifBattery")
+        if calc.get(field) is None or calc.get(field) == ""
+    ]
+    if missing_deductions:
+        logger.warning(
+            "FixMyPhone: %s (%s) saknar avdrag %s; berörda felkombinationer utelämnas",
+            model_name,
+            slug,
+            ", ".join(missing_deductions),
+        )
 
     for idx, var in enumerate(variations):
         storage_label = var.get("storage", "")
