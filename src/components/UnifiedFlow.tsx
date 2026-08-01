@@ -176,16 +176,24 @@ const screenConditionOptions: {
   { value: "micro", label: "Mikrorepor", glass: "none", wear: "minimal" },
   { value: "lightScratches", label: "Lätta repor", glass: "none", wear: "some" },
   { value: "visibleScratches", label: "Tydliga repor", glass: "none", wear: "visible" },
-  { value: "deepScratches", label: "Djupa repor i glaset", glass: "scratched", wear: "visible" },
-  { value: "chipped", label: "Flisor eller sprickor", glass: "chipped", wear: "visible" },
+  { value: "deepScratches", label: "Djupa repor", glass: "scratched", wear: "visible" },
+  { value: "chipped", label: "Sprickor/flisor", glass: "chipped", wear: "visible" },
 ];
 
 const sideOptions: Option<WearLevelWithCrack>[] = [
+  { value: "none", label: "Som nya", summary: "Som nya" },
+  { value: "minimal", label: "Mikrorepor", summary: "Mikrorepor" },
+  { value: "some", label: "Lätta repor", summary: "Lätta repor" },
+  { value: "visible", label: "Repor/bucklor", summary: "Repor/bucklor" },
+  { value: "cracked", label: "Spruckna", summary: "Spruckna" },
+];
+
+const backOptions: Option<WearLevelWithCrack>[] = [
   { value: "none", label: "Som ny", summary: "Som ny" },
-  { value: "minimal", label: "Minimalt slitage", summary: "Minimalt" },
-  { value: "some", label: "Repor som syns vid vinklar", summary: "Lätta repor" },
-  { value: "visible", label: "Synligt slitage - repor eller bucklor", summary: "Synliga skador" },
-  { value: "cracked", label: "Sprucken eller trasig", summary: "Sprucken" },
+  { value: "minimal", label: "Mikrorepor", summary: "Mikrorepor" },
+  { value: "some", label: "Lätta repor", summary: "Lätta repor" },
+  { value: "visible", label: "Tydliga repor", summary: "Tydliga repor" },
+  { value: "cracked", label: "Sprucken", summary: "Sprucken" },
 ];
 
 const functionalIssueOptions: {
@@ -435,7 +443,7 @@ const DevicePanel = ({
     { key: "battery", label: "Batteri", value: answers.batteryHealth === null ? "-" : `${answers.batteryHealth}%` },
     { key: "screen", label: "Skärm", value: screenSummary(answers) },
     { key: "sides", label: "Sidor", value: optionSummary(sideOptions, answers.sidesWear) },
-    { key: "back", label: "Baksida", value: optionSummary(sideOptions, answers.backWear) },
+    { key: "back", label: "Baksida", value: optionSummary(backOptions, answers.backWear) },
     { key: "function", label: "Funktionskoll", value: functionSummary(answers) },
   ];
 
@@ -1228,7 +1236,7 @@ const UnifiedFlow = ({ onShowResults, onModelSelected, initialModel, initialStep
       back: {
         title: "Hur ser baksidan ut?",
         hint: "Lägg telefonen med baksidan upp mot ett plant underlag och titta noga.",
-        options: sideOptions,
+        options: backOptions,
         value: answers.backWear,
         set: (value: WearLevelWithCrack) => setAnswers((current) => ({ ...current, backWear: value })),
         next: () => go("function"),
