@@ -1,7 +1,7 @@
 import json
 import logging
 import smtplib
-from asyncio import create_task, gather, to_thread
+from asyncio import Lock, create_task, gather, sleep, to_thread
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -18,6 +18,9 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["orders"])
+GOOGLE_SHEETS_MAX_ATTEMPTS = 3
+GOOGLE_SHEETS_RETRY_DELAYS_SECONDS = (1, 3)
+_GOOGLE_SHEETS_APPEND_LOCK = Lock()
 
 SHEET_COLUMNS = [
     ("order_id", "Ordernummer", 190),
@@ -828,13 +831,12 @@ async def _migrate_feedback_sheet_layout(
     return len(feedback_rows) - 1, len(legacy_column_indices)
 
 
-async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> None:
+async def _ensure_google_sheet_headers(client: httpx.AsyncClient, token: str) -> None:
     sheet_name = settings.google_sheets_worksheet_name
     spreadsheet_id = settings.google_sheets_spreadsheet_id
     encoded_range = httpx.URL(f"https://example.com/{sheet_name}!1:1").raw_path.decode().lstrip("/")
     base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values"
     headers = {"Authorization": f"Bearer {token}"}
-    sheet_id = await _get_google_sheet_id(client, token)
 
     get_response = await client.get(f"{base_url}/{encoded_range}", headers=headers)
     get_response.raise_for_status()
@@ -863,6 +865,10 @@ async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> 
         )
         update_response.raise_for_status()
 
+
+async def _ensure_google_sheet_layout(client: httpx.AsyncClient, token: str) -> None:
+    await _ensure_google_sheet_headers(client, token)
+    sheet_id = await _get_google_sheet_id(client, token)
     await _format_google_sheet(client, token, sheet_id)
 
 
@@ -899,6 +905,139 @@ async def _rebuild_google_sheet(client: httpx.AsyncClient, token: str) -> None:
     await _format_google_sheet(client, token, sheet_id)
 
 
+def _google_sheets_error_is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        return status_code in {408, 409, 425, 429} or status_code >= 500
+    return False
+
+
+def _google_sheets_error_message(exc: Exception) -> str:
+    detail = str(exc).strip()
+    return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+
+async def _google_sheet_order_exists(
+    client: httpx.AsyncClient,
+    token: str,
+    order_id: str,
+) -> bool:
+    sheet_name = settings.google_sheets_worksheet_name
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    order_id_column = _sheet_column_letter(_sheet_column_index("order_id") + 1)
+    encoded_range = httpx.URL(
+        f"https://example.com/{sheet_name}!{order_id_column}:{order_id_column}"
+    ).raw_path.decode().lstrip("/")
+    response = await client.get(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{encoded_range}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    response.raise_for_status()
+    return any(
+        row and str(row[0]).strip() == order_id
+        for row in response.json().get("values", [])[1:]
+    )
+
+
+async def _append_order_to_google_sheet(
+    client: httpx.AsyncClient,
+    token: str,
+    order: OrderOut,
+) -> tuple[bool, int | None]:
+    await _ensure_google_sheet_headers(client, token)
+    if await _google_sheet_order_exists(client, token, order.order_id):
+        return False, None
+
+    sheet_name = settings.google_sheets_worksheet_name
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    encoded_range = _sheet_values_range(sheet_name)
+    response = await client.post(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{encoded_range}:append",
+        params={"valueInputOption": "USER_ENTERED", "insertDataOption": "OVERWRITE"},
+        headers={"Authorization": f"Bearer {token}"},
+        json={"values": [_sheet_values(order)]},
+    )
+    response.raise_for_status()
+    updated_range = response.json().get("updates", {}).get("updatedRange", "")
+    return True, _range_end_row(updated_range)
+
+
+async def _run_google_sheet_post_write_tasks(
+    client: httpx.AsyncClient,
+    token: str,
+    order: OrderOut,
+    updated_end_row: int | None,
+) -> None:
+    spreadsheet_id = settings.google_sheets_spreadsheet_id
+    if updated_end_row:
+        try:
+            sheet_id = await _get_google_sheet_id(client, token)
+            format_response = await client.post(
+                f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "requests": [
+                        {
+                            "repeatCell": {
+                                "range": {
+                                    "sheetId": sheet_id,
+                                    "startRowIndex": updated_end_row - 1,
+                                    "endRowIndex": updated_end_row,
+                                    "startColumnIndex": 0,
+                                    "endColumnIndex": len(SHEET_COLUMNS),
+                                },
+                                "cell": {"userEnteredFormat": _google_sheet_data_row_format()},
+                                "fields": _google_sheet_data_row_format_fields(),
+                            }
+                        },
+                        *[
+                            {
+                                "repeatCell": {
+                                    "range": {
+                                        "sheetId": sheet_id,
+                                        "startRowIndex": updated_end_row - 1,
+                                        "endRowIndex": updated_end_row,
+                                        "startColumnIndex": _sheet_column_index(money_key),
+                                        "endColumnIndex": _sheet_column_index(money_key) + 1,
+                                    },
+                                    "cell": {
+                                        "userEnteredFormat": {
+                                            "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
+                                            "horizontalAlignment": "RIGHT",
+                                        }
+                                    },
+                                    "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
+                                }
+                            }
+                            for money_key in ("price_sek", "bid_difference_sek")
+                        ],
+                    ]
+                },
+            )
+            format_response.raise_for_status()
+        except Exception:
+            logger.warning(
+                "Order %s skrevs till Google Sheets men radformateringen misslyckades",
+                order.order_id,
+                exc_info=True,
+            )
+
+    try:
+        await _migrate_feedback_sheet_layout(
+            client,
+            token,
+            append_order_id=order.order_id,
+        )
+    except Exception:
+        logger.warning(
+            "Order %s skrevs till Google Sheets men Feedback-arket kunde inte synkas",
+            order.order_id,
+            exc_info=True,
+        )
+
+
 async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
     if not settings.google_service_account_json or not settings.google_sheets_spreadsheet_id:
         return IntegrationStatus(
@@ -909,77 +1048,47 @@ async def _send_to_google_sheet_api(order: OrderOut) -> IntegrationStatus:
 
     try:
         token = await _get_google_access_token()
-        sheet_name = settings.google_sheets_worksheet_name
-        spreadsheet_id = settings.google_sheets_spreadsheet_id
-        encoded_range = _sheet_values_range(sheet_name)
-
-        async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
-            await _ensure_google_sheet_layout(client, token)
-            sheet_id = await _get_google_sheet_id(client, token)
-            response = await client.post(
-                f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{encoded_range}:append",
-                params={"valueInputOption": "USER_ENTERED", "insertDataOption": "OVERWRITE"},
-                headers={"Authorization": f"Bearer {token}"},
-                json={"values": [_sheet_values(order)]},
-            )
-            response.raise_for_status()
-            updated_range = response.json().get("updates", {}).get("updatedRange", "")
-            updated_end_row = _range_end_row(updated_range)
-            if updated_end_row:
-                format_response = await client.post(
-                    f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "requests": [
-                            {
-                                "repeatCell": {
-                                    "range": {
-                                        "sheetId": sheet_id,
-                                        "startRowIndex": updated_end_row - 1,
-                                        "endRowIndex": updated_end_row,
-                                        "startColumnIndex": 0,
-                                        "endColumnIndex": len(SHEET_COLUMNS),
-                                    },
-                                    "cell": {"userEnteredFormat": _google_sheet_data_row_format()},
-                                    "fields": _google_sheet_data_row_format_fields(),
-                                }
-                            },
-                            *[
-                                {
-                                    "repeatCell": {
-                                        "range": {
-                                            "sheetId": sheet_id,
-                                            "startRowIndex": updated_end_row - 1,
-                                            "endRowIndex": updated_end_row,
-                                            "startColumnIndex": _sheet_column_index(money_key),
-                                            "endColumnIndex": _sheet_column_index(money_key) + 1,
-                                        },
-                                        "cell": {
-                                            "userEnteredFormat": {
-                                                "numberFormat": {"type": "NUMBER", "pattern": '#,##0 "kr"'},
-                                                "horizontalAlignment": "RIGHT",
-                                            }
-                                        },
-                                        "fields": "userEnteredFormat(numberFormat,horizontalAlignment)",
-                                    }
-                                }
-                                for money_key in ("price_sek", "bid_difference_sek")
-                            ],
-                        ]
-                    },
+        for attempt in range(1, GOOGLE_SHEETS_MAX_ATTEMPTS + 1):
+            try:
+                async with httpx.AsyncClient(timeout=settings.order_submission_timeout_seconds) as client:
+                    async with _GOOGLE_SHEETS_APPEND_LOCK:
+                        appended, updated_end_row = await _append_order_to_google_sheet(
+                            client,
+                            token,
+                            order,
+                        )
+                    await _run_google_sheet_post_write_tasks(
+                        client,
+                        token,
+                        order,
+                        updated_end_row,
+                    )
+                message = (
+                    "Order skickad till Google Sheet via Sheets API."
+                    if appended
+                    else "Ordern fanns redan i Google Sheet; ingen dubblett skapades."
                 )
-                format_response.raise_for_status()
-
-            await _migrate_feedback_sheet_layout(
-                client,
-                token,
-                append_order_id=order.order_id,
-            )
-
-        return IntegrationStatus(configured=True, ok=True, message="Order skickad till Google Sheet via Sheets API.")
+                return IntegrationStatus(configured=True, ok=True, message=message)
+            except Exception as exc:
+                if attempt >= GOOGLE_SHEETS_MAX_ATTEMPTS or not _google_sheets_error_is_retryable(exc):
+                    raise
+                delay = GOOGLE_SHEETS_RETRY_DELAYS_SECONDS[attempt - 1]
+                logger.warning(
+                    "Tillfälligt Google Sheets-fel för order %s (%s/%s, %s); försöker igen om %ss",
+                    order.order_id,
+                    attempt,
+                    GOOGLE_SHEETS_MAX_ATTEMPTS,
+                    _google_sheets_error_message(exc),
+                    delay,
+                )
+                await sleep(delay)
     except Exception as exc:
         logger.exception("Kunde inte skicka order %s till Google Sheets API", order.order_id)
-        return IntegrationStatus(configured=True, ok=False, message=str(exc))
+        return IntegrationStatus(
+            configured=True,
+            ok=False,
+            message=_google_sheets_error_message(exc),
+        )
 
 
 async def _send_to_google_sheet_webhook(order: OrderOut) -> IntegrationStatus:
