@@ -96,6 +96,7 @@ async def health():
         "version": "1.0.0",
         "order_email_template": "televera-2026-07-13-dynamic-shipping-v2",
         "feedback_sheet_layout": "authoritative-v2",
+        "order_backup": "database-append-only-v1",
     }
 
 

@@ -5,6 +5,39 @@ Backend skapar ett ordernummer och kan sedan spara ordern i Google Sheets.
 Orderbekräftelser skickas via SMTP när SMTP-miljövariablerna är satta. För
 launch använder vi Resend som SMTP-leverantör.
 
+## Databasbackup av order
+
+Innan API:t bekräftar en order sparas hela den mottagna ordern append-only i
+tabellen `order_submission_backups` i produktionsdatabasen. Backupen innehåller
+alla kund-, betalnings- och skickuppgifter samt de genererade fälten
+`order_id` och `created_at`. Google Sheets och e-post körs först efter att
+databastransaktionen har lyckats. Om databasen inte kan spara backupen svarar
+API:t med `503`, så kunden får inte en falsk orderbekräftelse.
+
+Varje mottaget försök sparas som en separat backuprad, även om samma
+`client_order_id` skickas flera gånger. Integrationsresultaten sparas på samma
+rad som `pending`, `delivered`, `failed` eller `skipped`.
+
+Backuperna innehåller personuppgifter och kan endast läsas med adminnyckeln:
+
+```bash
+# Senaste backuperna
+curl "$API_URL/api/orders/backups?limit=100" \
+  -H "X-API-Key: $SCRAPE_API_KEY"
+
+# Alla sparade försök för ett ordernummer
+curl "$API_URL/api/orders/backups/TLV-ORDERNUMMER" \
+  -H "X-API-Key: $SCRAPE_API_KEY"
+```
+
+En sparad order kan skickas om till Google Sheets utan att skapa en dubblett:
+
+```bash
+curl -X POST \
+  "$API_URL/api/orders/backups/BACKUP_ID/retry-google-sheets" \
+  -H "X-API-Key: $SCRAPE_API_KEY"
+```
+
 ## Railway-miljövariabler
 
 ```env

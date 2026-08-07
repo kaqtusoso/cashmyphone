@@ -109,6 +109,41 @@ class TrustpilotProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class OrderSubmissionBackup(Base):
+    """Append-only backup of every order payload received by the API."""
+
+    __tablename__ = "order_submission_backups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    google_sheets_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        nullable=False,
+    )
+    google_sheets_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    email_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        nullable=False,
+    )
+    email_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    integration_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    __table_args__ = (
+        Index("ix_order_submission_backups_order_received", "order_id", "received_at"),
+    )
+
+
 # ─── Pydantic-scheman (API-svar) ─────────────────────────────────────────────
 
 class PriceOut(BaseModel):

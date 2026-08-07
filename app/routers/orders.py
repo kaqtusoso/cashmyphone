@@ -11,10 +11,13 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from ..config import settings
+from ..database import AsyncSessionLocal
+from ..models import OrderSubmissionBackup
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["orders"])
@@ -113,10 +116,78 @@ class OrderCreateResponse(BaseModel):
     integrations: dict[str, IntegrationStatus]
 
 
+class OrderBackupOut(BaseModel):
+    backup_id: int
+    order_id: str
+    received_at: datetime
+    order: OrderOut
+    google_sheets_status: str
+    google_sheets_message: str | None = None
+    email_status: str
+    email_message: str | None = None
+
+
 def _make_order(payload: OrderCreate) -> OrderOut:
     created_at = datetime.now(timezone.utc).isoformat()
     order_id = payload.client_order_id or f"TLV-{uuid4().hex[:10].upper()}"
     return OrderOut(order_id=order_id, created_at=created_at, **payload.model_dump())
+
+
+def _order_backup_payload(order: OrderOut) -> str:
+    return json.dumps(
+        order.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _order_backup_out(backup: OrderSubmissionBackup) -> OrderBackupOut:
+    return OrderBackupOut(
+        backup_id=backup.id,
+        order_id=backup.order_id,
+        received_at=backup.received_at,
+        order=OrderOut.model_validate(json.loads(backup.payload_json)),
+        google_sheets_status=backup.google_sheets_status,
+        google_sheets_message=backup.google_sheets_message,
+        email_status=backup.email_status,
+        email_message=backup.email_message,
+    )
+
+
+async def _store_order_backup(order: OrderOut) -> int:
+    backup = OrderSubmissionBackup(
+        order_id=order.order_id,
+        payload_json=_order_backup_payload(order),
+    )
+    async with AsyncSessionLocal() as session:
+        session.add(backup)
+        await session.commit()
+        await session.refresh(backup)
+    return backup.id
+
+
+def _integration_backup_status(status: IntegrationStatus) -> str:
+    if not status.configured:
+        return "skipped"
+    return "delivered" if status.ok else "failed"
+
+
+async def _update_order_backup_integrations(
+    backup_id: int,
+    sheets_status: IntegrationStatus,
+    email_status: IntegrationStatus,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        backup = await session.get(OrderSubmissionBackup, backup_id)
+        if backup is None:
+            logger.error("Orderbackup %s saknas när integrationsstatus ska sparas", backup_id)
+            return
+        backup.google_sheets_status = _integration_backup_status(sheets_status)
+        backup.google_sheets_message = sheets_status.message
+        backup.email_status = _integration_backup_status(email_status)
+        backup.email_message = email_status.message
+        backup.integration_updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await session.commit()
 
 
 def _format_sheet_datetime(value: str) -> str:
@@ -1980,9 +2051,78 @@ async def run_feedback_emails_now(
     return await run_order_feedback_emails(dry_run=dry_run)
 
 
+@router.get("/orders/backups", response_model=list[OrderBackupOut])
+async def list_order_backups(
+    limit: int = Query(default=100, ge=1, le=500),
+    x_api_key: str | None = Header(default=None),
+):
+    _require_order_admin_key(x_api_key)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(OrderSubmissionBackup)
+            .order_by(OrderSubmissionBackup.id.desc())
+            .limit(limit)
+        )
+        backups = result.scalars().all()
+    return [_order_backup_out(backup) for backup in backups]
+
+
+@router.get("/orders/backups/{order_id}", response_model=list[OrderBackupOut])
+async def get_order_backups(
+    order_id: str,
+    x_api_key: str | None = Header(default=None),
+):
+    _require_order_admin_key(x_api_key)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(OrderSubmissionBackup)
+            .where(OrderSubmissionBackup.order_id == order_id)
+            .order_by(OrderSubmissionBackup.id.desc())
+        )
+        backups = result.scalars().all()
+    if not backups:
+        raise HTTPException(status_code=404, detail="Orderbackup saknas")
+    return [_order_backup_out(backup) for backup in backups]
+
+
+@router.post(
+    "/orders/backups/{backup_id}/retry-google-sheets",
+    response_model=IntegrationStatus,
+)
+async def retry_order_backup_google_sheets(
+    backup_id: int,
+    x_api_key: str | None = Header(default=None),
+):
+    _require_order_admin_key(x_api_key)
+    async with AsyncSessionLocal() as session:
+        backup = await session.get(OrderSubmissionBackup, backup_id)
+        if backup is None:
+            raise HTTPException(status_code=404, detail="Orderbackup saknas")
+        order = OrderOut.model_validate(json.loads(backup.payload_json))
+
+    sheets_status = await _send_to_google_sheet(order)
+    async with AsyncSessionLocal() as session:
+        backup = await session.get(OrderSubmissionBackup, backup_id)
+        if backup is not None:
+            backup.google_sheets_status = _integration_backup_status(sheets_status)
+            backup.google_sheets_message = sheets_status.message
+            backup.integration_updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            await session.commit()
+    return sheets_status
+
+
 @router.post("/orders", response_model=OrderCreateResponse)
 async def create_order(payload: OrderCreate):
     order = _make_order(payload)
+
+    try:
+        backup_id = await _store_order_backup(order)
+    except Exception as exc:
+        logger.exception("Order %s kunde inte säkerhetskopieras", order.order_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Ordern kunde inte säkerhetskopieras och har därför inte registrerats. Försök igen.",
+        ) from exc
 
     async def _send_order_integrations() -> None:
         try:
@@ -1994,6 +2134,17 @@ async def create_order(payload: OrderCreate):
                 logger.warning("Order %s registrerad men Google Sheets misslyckades: %s", order.order_id, sheets_status.message)
             if not email_status.ok:
                 logger.warning("Order %s registrerad men bekräftelsemail misslyckades: %s", order.order_id, email_status.message)
+            try:
+                await _update_order_backup_integrations(
+                    backup_id,
+                    sheets_status,
+                    email_status,
+                )
+            except Exception:
+                logger.exception(
+                    "Integrationsstatus kunde inte sparas för orderbackup %s",
+                    backup_id,
+                )
         except Exception:
             logger.exception("Order %s registrerad men integrationsjobbet kraschade", order.order_id)
 
